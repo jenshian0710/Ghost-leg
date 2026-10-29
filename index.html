@@ -53,7 +53,8 @@
         }
         
         /* 全螢幕模式的排版覆寫 */
-        body.fullscreen-mode header {
+        body.fullscreen-mode header,
+        body.fullscreen-mode footer {
             display: none !important;
         }
         body.fullscreen-mode main {
@@ -282,6 +283,13 @@
 
                 <!-- 動作按鈕區 -->
                 <div class="flex items-center flex-wrap gap-2 w-full sm:w-auto justify-end">
+                    <!-- 搬移到此處的縮放控制項 -->
+                    <div class="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200 mr-1">
+                        <button id="btnZoomOut" class="px-2.5 py-1.5 hover:bg-white rounded-lg text-slate-700 transition shadow-sm" title="縮小畫布"><i class="fa-solid fa-magnifying-glass-minus"></i></button>
+                        <span id="zoomLevelText" class="px-2 py-1 text-xs font-bold text-slate-700 w-12 text-center">100%</span>
+                        <button id="btnZoomIn" class="px-2.5 py-1.5 hover:bg-white rounded-lg text-slate-700 transition shadow-sm" title="放大畫布"><i class="fa-solid fa-magnifying-glass-plus"></i></button>
+                    </div>
+
                     <button id="btnToggleFullscreen" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-2 rounded-xl text-sm font-bold transition flex items-center gap-1.5" title="切換全螢幕觀看">
                         <i class="fa-solid fa-expand"></i> <span id="fullscreenText">全螢幕</span>
                     </button>
@@ -312,12 +320,6 @@
 
             <!-- 鬼腳圖 Canvas 畫布區 (包含縮放控制) -->
             <div class="bg-white rounded-2xl shadow-sm border border-slate-200 relative flex flex-col canvas-container-wrapper">
-                <!-- 縮放控制項 -->
-                <div class="absolute top-3 right-3 flex items-center gap-1 bg-white/90 p-1 rounded-lg shadow-md border border-slate-200 z-10 backdrop-blur-sm">
-                    <button id="btnZoomOut" class="p-1.5 hover:bg-slate-200 rounded text-slate-700 transition" title="縮小"><i class="fa-solid fa-magnifying-glass-minus"></i></button>
-                    <span id="zoomLevelText" class="px-2 py-1 text-xs font-bold text-slate-700 w-12 text-center">100%</span>
-                    <button id="btnZoomIn" class="p-1.5 hover:bg-slate-200 rounded text-slate-700 transition" title="放大"><i class="fa-solid fa-magnifying-glass-plus"></i></button>
-                </div>
                 
                 <!-- 捲動區 -->
                 <div id="canvasScrollContainer" class="p-2 sm:p-4 overflow-x-auto overflow-y-hidden w-full">
@@ -343,6 +345,10 @@
 
         </section>
     </main>
+
+    <footer class="py-3 text-center text-sm font-bold text-slate-500 shrink-0 tracking-wide">
+        網頁設計：林口國中李政憲老師
+    </footer>
 
     <!-- 自訂彈出對話框 (取代 alert / prompt) -->
     <div id="customModal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
@@ -1568,9 +1574,6 @@
                                 <div class="flex justify-between items-center mb-1 flex-wrap gap-1">
                                     <label class="text-xs font-bold text-slate-700">辨識出的名單 (可直接點擊修改)：</label>
                                     <div class="flex gap-1">
-                                        <button type="button" id="btnFillSamplePhoto" class="text-[11px] text-amber-700 bg-amber-100 hover:bg-amber-200 px-2 py-0.5 rounded font-medium transition">
-                                            帶入黃紙範例
-                                        </button>
                                         <button type="button" id="btnFillScreenshot" class="text-[11px] text-indigo-700 bg-indigo-100 hover:bg-indigo-200 px-2 py-0.5 rounded font-medium transition">
                                             帶入截圖範例(振熙等)
                                         </button>
@@ -1633,7 +1636,6 @@
                 setTimeout(() => {
                     const fileAll = document.getElementById('fileUploadAll');
                     const fileCam = document.getElementById('fileCameraCapture');
-                    const btnSample = document.getElementById('btnFillSamplePhoto');
                     const btnOpenLiveCam = document.getElementById('btnOpenLiveCam');
                     const btnCloseLiveCam = document.getElementById('btnCloseLiveCam');
                     const btnSwitchCam = document.getElementById('btnSwitchCam');
@@ -1673,14 +1675,6 @@
                                 const capturedFile = new File([blob], 'camera-capture.jpg', { type: 'image/jpeg' });
                                 await processUploadedFileForNames(capturedFile);
                             }, 'image/jpeg', 0.95);
-                        };
-                    }
-
-                    if (btnSample) {
-                        btnSample.onclick = () => {
-                            const area = document.getElementById('modalImportNames');
-                            area.value = '李政憲\n李岱融\n李芸臻';
-                            showToast('已帶入黃紙照片中的 3 位姓名！');
                         };
                     }
 
