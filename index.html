@@ -1,0 +1,2443 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>互動式鬼腳圖 (阿彌陀籤) 遊戲</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <!-- 引入 Excel 與 Word 前端解析套件 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap');
+        body {
+            font-family: 'Noto Sans TC', sans-serif;
+            background-color: #f8fafc;
+            user-select: none;
+        }
+        /* 自定義捲軸 */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f5f9;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+        .canvas-container {
+            position: relative;
+            width: 100%;
+            overflow-x: auto;
+            overflow-y: hidden;
+        }
+        canvas {
+            display: block;
+            margin: 0 auto;
+            touch-action: none; /* 防止觸控畫線時畫面捲動 */
+        }
+        .pulse-btn {
+            animation: pulse-ring 2s infinite;
+        }
+        @keyframes pulse-ring {
+            0% { box-shadow: 0 0 0 0 rgba(79, 70, 229, 0.4); }
+            70% { box-shadow: 0 0 0 10px rgba(79, 70, 229, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(79, 70, 229, 0); }
+        }
+        
+        /* 全螢幕模式的排版覆寫 */
+        body.fullscreen-mode header {
+            display: none !important;
+        }
+        body.fullscreen-mode main {
+            max-width: 100% !important;
+            padding: 0.5rem !important;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            margin: 0;
+        }
+        body.fullscreen-mode #sidebarPanel {
+            display: none !important;
+        }
+        body.fullscreen-mode section.lg\:col-span-8 {
+            grid-column: span 12 / span 12 !important;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+        body.fullscreen-mode .canvas-container-wrapper {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+        body.fullscreen-mode #canvasScrollContainer {
+            flex: 1;
+            display: flex;
+            align-items: center;
+        }
+    </style>
+</head>
+<body class="text-slate-800 min-h-screen flex flex-col">
+
+    <!-- 頂部導覽列 -->
+    <header class="bg-indigo-600 text-white shadow-md sticky top-0 z-30">
+        <div class="max-w-7xl mx-auto px-4 py-3 flex flex-wrap justify-between items-center gap-3">
+            <div class="flex items-center space-x-3">
+                <i class="fa-solid fa-route text-2xl text-amber-300"></i>
+                <h1 class="text-xl md:text-2xl font-bold tracking-wide">互動式鬼腳圖遊戲</h1>
+                <span id="currentGroupBadge" class="bg-indigo-800 text-indigo-100 text-xs px-2.5 py-1 rounded-full font-medium border border-indigo-500">
+                    內建群組 (20人)
+                </span>
+            </div>
+            
+            <div class="flex items-center flex-wrap gap-2">
+                <button id="btnRestoreDefault" class="bg-amber-500 hover:bg-amber-600 text-white text-sm px-3 py-1.5 rounded-lg font-medium transition shadow-sm flex items-center gap-1.5" title="還原為內建的 20 人配置">
+                    <i class="fa-solid fa-rotate-left"></i> 還原預設配置
+                </button>
+                <button id="btnExportImport" class="bg-indigo-500 hover:bg-indigo-400 text-white text-sm px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5">
+                    <i class="fa-solid fa-file-export"></i> 備份/載入設定
+                </button>
+                <button id="btnToggleSidebar" class="lg:hidden bg-indigo-700 hover:bg-indigo-800 text-white p-2 rounded-lg">
+                    <i class="fa-solid fa-sliders"></i> 設定面板
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- 主內容區 -->
+    <main class="flex-1 max-w-7xl w-full mx-auto px-2 sm:px-4 py-4 grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        
+        <!-- 左側設定面板 (可收合) -->
+        <aside id="sidebarPanel" class="lg:col-span-4 bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden transition-all duration-300">
+            <!-- 頁籤導覽 -->
+            <div class="grid grid-cols-3 bg-slate-100 p-1 border-b border-slate-200 text-sm font-bold text-slate-600">
+                <button data-tab="tab-group" class="tab-btn active py-2 rounded-xl bg-white text-indigo-600 shadow-sm transition">
+                    <i class="fa-solid fa-users mr-1"></i>名單與組別
+                </button>
+                <button data-tab="tab-prizes" class="tab-btn py-2 rounded-xl hover:text-slate-900 transition">
+                    <i class="fa-solid fa-gift mr-1"></i>號碼/品項
+                </button>
+                <button data-tab="tab-rules" class="tab-btn py-2 rounded-xl hover:text-slate-900 transition">
+                    <i class="fa-solid fa-bars-staggered mr-1"></i>橫線與顯示
+                </button>
+            </div>
+
+            <!-- 頁籤 1：名單與組別 -->
+            <div id="tab-group" class="tab-content p-4 space-y-4">
+                <!-- 組別選擇與管理 -->
+                <div class="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2.5">
+                    <div class="flex justify-between items-center">
+                        <label class="text-xs font-bold text-slate-500 uppercase tracking-wider">目前選擇組別</label>
+                        <div class="flex gap-1">
+                            <button id="btnNewGroup" class="text-xs bg-indigo-50 hover:bg-indigo-100 text-indigo-600 px-2 py-1 rounded font-medium transition">
+                                <i class="fa-solid fa-plus"></i> 新增組別
+                            </button>
+                            <button id="btnEditGroup" class="text-xs bg-amber-50 hover:bg-amber-100 text-amber-600 px-2 py-1 rounded font-medium transition" title="編輯目前組別名稱與名單">
+                                <i class="fa-solid fa-pen"></i> 編輯
+                            </button>
+                            <button id="btnDeleteGroup" class="text-xs bg-rose-50 hover:bg-rose-100 text-rose-600 px-2 py-1 rounded font-medium transition" title="刪除目前組別">
+                                <i class="fa-solid fa-trash-can"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <select id="groupSelect" class="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500"></select>
+                </div>
+
+                <!-- 學生名單編輯 -->
+                <div class="space-y-2">
+                    <div class="flex justify-between items-center">
+                        <span class="text-sm font-bold text-slate-700">參與同學名單 (<span id="participantCount">20</span>人)</span>
+                        <div class="space-x-1 flex flex-wrap justify-end gap-y-1">
+                            <button id="btnPokerNames" class="text-xs bg-rose-100 hover:bg-rose-200 text-rose-800 px-2 py-1 rounded-md font-medium transition" title="依目前人數替換為撲克牌名單">
+                                <i class="fa-solid fa-heart mr-1"></i>匯入撲克牌
+                            </button>
+                            <button id="btnImportNames" class="text-xs bg-emerald-100 hover:bg-emerald-200 text-emerald-800 px-2 py-1 rounded-md font-medium transition" title="批次匯入多筆名單">
+                                <i class="fa-solid fa-file-import mr-1"></i>批次匯入
+                            </button>
+                            <button id="btnShuffleNames" class="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 px-2 py-1 rounded-md font-medium transition" title="隨機打亂姓名順序">
+                                <i class="fa-solid fa-shuffle mr-1"></i>隨機排序
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 新增學生輸入框 -->
+                    <div class="flex gap-2">
+                        <input type="text" id="inputNewName" placeholder="輸入新增同學姓名..." class="flex-1 border border-slate-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                        <button id="btnAddName" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium transition">
+                            <i class="fa-solid fa-plus"></i> 新增
+                        </button>
+                    </div>
+
+                    <!-- 名單列表 -->
+                    <ul id="namesList" class="space-y-1.5 max-h-64 overflow-y-auto pr-1 pt-1"></ul>
+                </div>
+            </div>
+
+            <!-- 頁籤 2：目的地號碼與品項 -->
+            <div id="tab-prizes" class="tab-content hidden p-4 space-y-4">
+                <div class="flex justify-between items-center">
+                    <span class="text-sm font-bold text-slate-700">底部目的地設定</span>
+                    <div class="flex gap-1 flex-wrap justify-end">
+                        <button id="btnPokerPrizes" class="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 px-2 py-1 rounded font-medium transition">
+                            撲克牌
+                        </button>
+                        <button id="btnAutoNumberPrizes" class="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 px-2 py-1 rounded font-medium transition">
+                            1~N 依序編號
+                        </button>
+                        <button id="btnShufflePrizes" class="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 px-2 py-1 rounded font-medium transition">
+                            <i class="fa-solid fa-shuffle mr-1"></i>打亂順序
+                        </button>
+                    </div>
+                </div>
+                <p class="text-xs text-slate-500">可自由輸入號碼、獎品或懲罰項目（數量會自動對齊上方人數）：</p>
+                <ul id="prizesList" class="space-y-2 max-h-80 overflow-y-auto pr-1"></ul>
+            </div>
+
+            <!-- 頁籤 3：橫線與隱藏設定 -->
+            <div id="tab-rules" class="tab-content hidden p-4 space-y-5">
+                <!-- 橫線數量設定 -->
+                <div class="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-3">
+                    <div class="flex justify-between items-center">
+                        <label class="text-sm font-bold text-slate-700">橫線 (綠線) 數量設定</label>
+                        <span id="rungCountBadge" class="bg-emerald-100 text-emerald-800 text-xs px-2.5 py-0.5 rounded-full font-bold">6 條</span>
+                    </div>
+                    
+                    <div class="flex items-center gap-3">
+                        <input type="range" id="sliderRungCount" min="1" max="35" value="6" class="flex-1 accent-indigo-600 cursor-pointer">
+                        <input type="number" id="inputRungCount" min="0" max="60" value="6" class="w-16 border border-slate-300 rounded-lg px-2 py-1 text-center text-sm font-bold">
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-2 pt-1">
+                        <button id="btnRandomRungs" class="bg-indigo-600 hover:bg-indigo-700 text-white py-2 px-3 rounded-lg text-sm font-medium transition flex items-center justify-center gap-1.5 shadow-sm">
+                            <i class="fa-solid fa-wand-magic-sparkles"></i> 隨機產生橫線
+                        </button>
+                        <button id="btnClearRungs" class="bg-white hover:bg-rose-50 text-rose-600 border border-rose-200 py-2 px-3 rounded-lg text-sm font-medium transition flex items-center justify-center gap-1.5">
+                            <i class="fa-solid fa-eraser"></i> 清空所有橫線
+                        </button>
+                    </div>
+                    <p class="text-xs text-slate-500 leading-relaxed">
+                        <i class="fa-solid fa-lightbulb text-amber-500 mr-1"></i>提示：切換到右側的「編輯橫線」模式，可以直接在任兩條紅線之間點擊新增或刪除綠線！
+                    </p>
+                </div>
+
+                <!-- 遮蔽與隱藏設定 -->
+                <div class="space-y-2.5">
+                    <h4 class="text-sm font-bold text-slate-700">遮蔽與盲抽設定</h4>
+                    
+                    <label class="flex items-center justify-between p-2.5 bg-slate-50 hover:bg-slate-100 rounded-xl border border-slate-200 cursor-pointer transition">
+                        <div class="flex items-center gap-2.5">
+                            <i class="fa-solid fa-user-secret text-indigo-500 w-5 text-center"></i>
+                            <span class="text-sm font-medium text-slate-700">隱藏上方同學姓名</span>
+                        </div>
+                        <input type="checkbox" id="chkHideNames" class="w-4 h-4 accent-indigo-600 rounded cursor-pointer">
+                    </label>
+
+                    <label class="flex items-center justify-between p-2.5 bg-slate-50 hover:bg-slate-100 rounded-xl border border-slate-200 cursor-pointer transition">
+                        <div class="flex items-center gap-2.5">
+                            <i class="fa-solid fa-gift text-rose-500 w-5 text-center"></i>
+                            <span class="text-sm font-medium text-slate-700">隱藏底部號碼/品項</span>
+                        </div>
+                        <input type="checkbox" id="chkHidePrizes" class="w-4 h-4 accent-indigo-600 rounded cursor-pointer">
+                    </label>
+
+                    <label class="flex items-center justify-between p-2.5 bg-slate-50 hover:bg-slate-100 rounded-xl border border-slate-200 cursor-pointer transition">
+                        <div class="flex items-center gap-2.5">
+                            <i class="fa-solid fa-eye-slash text-emerald-600 w-5 text-center"></i>
+                            <span class="text-sm font-medium text-slate-700">隱藏中間橫線 (神秘盲抽)</span>
+                        </div>
+                        <input type="checkbox" id="chkHideRungs" class="w-4 h-4 accent-indigo-600 rounded cursor-pointer">
+                    </label>
+                </div>
+            </div>
+        </aside>
+
+        <!-- 右側主畫布與互動區 -->
+        <section class="lg:col-span-8 flex flex-col gap-4">
+            
+            <!-- 互動模式與操作控制列 -->
+            <div class="bg-white p-3 sm:p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-wrap items-center justify-between gap-3">
+                
+                <!-- 三種互動模式切換 -->
+                <div class="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200 w-full sm:w-auto justify-center">
+                    <button data-mode="auto" class="mode-btn active flex-1 sm:flex-initial px-3 py-1.5 rounded-lg text-sm font-bold bg-indigo-600 text-white shadow-sm transition flex items-center justify-center gap-1.5">
+                        <i class="fa-solid fa-robot"></i> 電腦走線
+                    </button>
+                    <button data-mode="draw" class="mode-btn flex-1 sm:flex-initial px-3 py-1.5 rounded-lg text-sm font-bold text-slate-600 hover:text-slate-900 transition flex items-center justify-center gap-1.5">
+                        <i class="fa-solid fa-pen-nib"></i> 手動連連看
+                    </button>
+                    <button data-mode="edit" class="mode-btn flex-1 sm:flex-initial px-3 py-1.5 rounded-lg text-sm font-bold text-slate-600 hover:text-slate-900 transition flex items-center justify-center gap-1.5">
+                        <i class="fa-solid fa-Sliders"></i> 點擊增減橫線
+                    </button>
+                </div>
+
+                <!-- 動作按鈕區 -->
+                <div class="flex items-center flex-wrap gap-2 w-full sm:w-auto justify-end">
+                    <button id="btnToggleFullscreen" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-2 rounded-xl text-sm font-bold transition flex items-center gap-1.5" title="切換全螢幕觀看">
+                        <i class="fa-solid fa-expand"></i> <span id="fullscreenText">全螢幕</span>
+                    </button>
+                    <button id="btnTraceAll" class="flex-1 sm:flex-initial bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl text-sm font-bold transition shadow-sm flex items-center justify-center gap-1.5 pulse-btn">
+                        <i class="fa-solid fa-play"></i> 全部路線揭曉
+                    </button>
+                    <button id="btnInstantAll" class="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 px-3 py-2 rounded-xl text-sm font-bold transition flex items-center gap-1" title="跳過動畫直接顯示完成圖">
+                        <i class="fa-solid fa-bolt"></i> 直接完成圖
+                    </button>
+                    <button id="btnClearPaths" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-2 rounded-xl text-sm font-medium transition flex items-center gap-1" title="清除已畫出的路線">
+                        <i class="fa-solid fa-rotate-left"></i> 清除路線
+                    </button>
+                </div>
+            </div>
+
+            <!-- 操作提示橫幅 -->
+            <div id="modeInstructionBar" class="bg-indigo-50 border border-indigo-200 text-indigo-900 px-4 py-2.5 rounded-xl text-xs sm:text-sm flex items-center justify-between gap-2">
+                <div class="flex items-center gap-2">
+                    <i id="modeIcon" class="fa-solid fa-circle-info text-indigo-600 text-base"></i>
+                    <span id="modeInstructionText" class="font-medium">
+                        【電腦走線模式】點擊「姓名」可由上往下連線；點擊底部「號碼/品項」可由下往上反查是哪位同學喔！
+                    </span>
+                </div>
+                <span id="drawingStatusBadge" class="hidden bg-amber-100 text-amber-800 border border-amber-300 px-2.5 py-0.5 rounded-full text-xs font-bold shrink-0">
+                    繪製中...
+                </span>
+            </div>
+
+            <!-- 鬼腳圖 Canvas 畫布區 (包含縮放控制) -->
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-200 relative flex flex-col canvas-container-wrapper">
+                <!-- 縮放控制項 -->
+                <div class="absolute top-3 right-3 flex items-center gap-1 bg-white/90 p-1 rounded-lg shadow-md border border-slate-200 z-10 backdrop-blur-sm">
+                    <button id="btnZoomOut" class="p-1.5 hover:bg-slate-200 rounded text-slate-700 transition" title="縮小"><i class="fa-solid fa-magnifying-glass-minus"></i></button>
+                    <span id="zoomLevelText" class="px-2 py-1 text-xs font-bold text-slate-700 w-12 text-center">100%</span>
+                    <button id="btnZoomIn" class="p-1.5 hover:bg-slate-200 rounded text-slate-700 transition" title="放大"><i class="fa-solid fa-magnifying-glass-plus"></i></button>
+                </div>
+                
+                <!-- 捲動區 -->
+                <div id="canvasScrollContainer" class="p-2 sm:p-4 overflow-x-auto overflow-y-hidden w-full">
+                    <canvas id="amidakujiCanvas" height="560"></canvas>
+                </div>
+            </div>
+
+            <!-- 最終結果總覽面板 -->
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 space-y-3">
+                <div class="flex items-center justify-between border-b border-slate-100 pb-2">
+                    <h3 class="font-bold text-slate-800 flex items-center gap-2">
+                        <i class="fa-solid fa-clipboard-check text-indigo-600"></i>
+                        配對結果一覽表
+                    </h3>
+                    <button id="btnRevealAllMasks" class="text-xs bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 px-2.5 py-1 rounded-lg font-medium transition">
+                        <i class="fa-solid fa-eye mr-1"></i>全部解除隱藏
+                    </button>
+                </div>
+                <div id="resultsGrid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-2.5">
+                    <!-- 動態生成結果卡片 -->
+                </div>
+            </div>
+
+        </section>
+    </main>
+
+    <!-- 自訂彈出對話框 (取代 alert / prompt) -->
+    <div id="customModal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-xl border border-slate-200 max-w-md w-full p-5 space-y-4 animate-fade-in">
+            <div class="flex justify-between items-center border-b border-slate-100 pb-3">
+                <h3 id="modalTitle" class="text-lg font-bold text-slate-800">標題</h3>
+                <button id="btnCloseModal" class="text-slate-400 hover:text-slate-600 p-1">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+            <div id="modalBody" class="text-sm text-slate-600 space-y-3">
+                <!-- 動態內容 -->
+            </div>
+            <div id="modalFooter" class="flex justify-end gap-2 pt-2">
+                <button id="btnModalCancel" class="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium transition">取消</button>
+                <button id="btnModalConfirm" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold transition">確定</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 底部提示 Toast -->
+    <div id="toastMsg" class="fixed bottom-5 right-5 bg-slate-800 text-white px-4 py-2.5 rounded-xl shadow-lg text-sm font-medium flex items-center gap-2 z-50 opacity-0 pointer-events-none transition-opacity duration-300">
+        <i class="fa-solid fa-circle-check text-emerald-400"></i>
+        <span id="toastText">已更新設定</span>
+    </div>
+
+    <script>
+        /**
+         * 預設 20 人的群組配置
+         */
+        function createInitialRungs(cols, count) {
+            const rungs = [];
+            for (let i = 0; i < count; i++) {
+                rungs.push({
+                    col: Math.floor(Math.random() * cols),
+                    yRatio: Number((0.10 + Math.random() * 0.80).toFixed(3))
+                });
+            }
+            return rungs.sort((a, b) => a.yRatio - b.yRatio);
+        }
+
+        const DEFAULT_GROUP_20 = {
+            id: 'default-class-group',
+            groupName: '內建群組 (20人)',
+            names: Array.from({length: 20}, (_, i) => String(i + 1)),
+            prizes: Array.from({length: 20}, (_, i) => String(i + 1)),
+            rungs: createInitialRungs(19, 30) // 隨機產生 30 條橫線
+        };
+
+        // 每位學生的專屬路線色彩
+        const PATH_COLORS = [
+            '#2563eb', // 藍
+            '#d97706', // 琥珀橘
+            '#7c3aed', // 紫
+            '#059669', // 翡翠綠
+            '#db2777', // 桃紅
+            '#0891b2', // 青藍
+            '#4f46e5', // 靛藍
+            '#ea580c', // 深橘
+            '#65a30d', // 萊姆綠
+            '#9333ea'  // 亮紫
+        ];
+
+        // 應用程式主狀態
+        const state = {
+            groups: [JSON.parse(JSON.stringify(DEFAULT_GROUP_20))],
+            currentGroupIndex: 0,
+            mode: 'auto', // 'auto' (電腦走線) | 'draw' (手動連連看) | 'edit' (點擊增減橫線)
+            hideNames: false,
+            hidePrizes: false,
+            hideRungs: false,
+            revealedNames: {},  // 紀錄單獨被翻開的姓名 index
+            revealedPrizes: {}, // 紀錄單獨被翻開的獎品 index
+            
+            // 路線與動畫狀態
+            completedPaths: {}, // { startColIndex: { points: [...], endCol: number, color: string } }
+            activeAnimations: [], // 正在跑的電腦動畫
+            selectedAutoCol: null, // 目前高亮強調的學生欄位
+            
+            // 手動連連看狀態
+            manualDraw: {
+                isDrawing: false,
+                startCol: null,
+                points: [],
+                color: '#2563eb'
+            },
+
+            // 編輯模式下預覽滑鼠位置
+            hoverRung: null // { col, yRatio, existingIndex }
+        };
+
+        let currentZoom = 1.0; // 畫布縮放比例
+
+        // Canvas 幾何設定常數
+        const LAYOUT = {
+            topMargin: 75,
+            bottomMargin: 75,
+            sideMargin: 65,
+            minColSpacing: 95,
+            canvasHeight: 560,
+            boxWidth: 80,
+            boxHeight: 38
+        };
+
+        // DOM 元素參照
+        const canvas = document.getElementById('amidakujiCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // 初始化執行
+        window.onload = function() {
+            bindEvents();
+            syncUIFromState();
+            resizeAndDraw();
+            window.addEventListener('resize', resizeAndDraw);
+        };
+
+        // 取得目前組別物件
+        function getCurrentGroup() {
+            return state.groups[state.currentGroupIndex];
+        }
+
+        // 顯示底部提示訊息
+        let toastTimer = null;
+        function showToast(text) {
+            const toast = document.getElementById('toastMsg');
+            document.getElementById('toastText').textContent = text;
+            toast.classList.remove('opacity-0');
+            clearTimeout(toastTimer);
+            toastTimer = setTimeout(() => {
+                toast.classList.add('opacity-0');
+            }, 2400);
+        }
+
+        // 尋找指定的終點是由哪一個起點連過來的 (反向查找)
+        function findStartColForEndCol(targetEndCol) {
+            const group = getCurrentGroup();
+            for (let i = 0; i < group.names.length; i++) {
+                if (calculatePathForColumn(i).endCol === targetEndCol) {
+                    return i;
+                }
+            }
+            return 0;
+        }
+
+        // 計算指定起點欄位的標準正確路徑 (逢綠線必轉)
+        function calculatePathForColumn(startCol) {
+            const group = getCurrentGroup();
+            const sortedRungs = [...group.rungs].sort((a, b) => a.yRatio - b.yRatio);
+            
+            let currentCol = startCol;
+            let currentY = 0; // yRatio 0 ~ 1
+            const pathRatios = [{ col: currentCol, yRatio: 0 }];
+
+            for (const rung of sortedRungs) {
+                if (rung.yRatio <= currentY) continue;
+                if (rung.col === currentCol) {
+                    // 遇到右側橫線 -> 先往下走到交點，再右轉
+                    pathRatios.push({ col: currentCol, yRatio: rung.yRatio });
+                    currentCol = currentCol + 1;
+                    pathRatios.push({ col: currentCol, yRatio: rung.yRatio });
+                    currentY = rung.yRatio;
+                } else if (rung.col === currentCol - 1) {
+                    // 遇到左側橫線 -> 先往下走到交點，再左轉
+                    pathRatios.push({ col: currentCol, yRatio: rung.yRatio });
+                    currentCol = currentCol - 1;
+                    pathRatios.push({ col: currentCol, yRatio: rung.yRatio });
+                    currentY = rung.yRatio;
+                }
+            }
+
+            // 抵達底部終點
+            pathRatios.push({ col: currentCol, yRatio: 1 });
+            return {
+                startCol,
+                endCol: currentCol,
+                pathRatios
+            };
+        }
+
+        // 將相對比例座標轉換為 Canvas 實際像素座標
+        function getCanvasGeometry() {
+            const group = getCurrentGroup();
+            const count = group.names.length;
+            const containerEl = document.getElementById('canvasScrollContainer');
+            // 計算時考慮縮放倍率，讓畫布能在邏輯上延展
+            const containerWidth = (containerEl.clientWidth - 20) / currentZoom;
+            const requiredWidth = Math.max(containerWidth, LAYOUT.sideMargin * 2 + (count - 1) * LAYOUT.minColSpacing);
+            
+            const usableWidth = requiredWidth - LAYOUT.sideMargin * 2;
+            const colSpacing = count > 1 ? usableWidth / (count - 1) : 0;
+            const lineTop = LAYOUT.topMargin;
+            const lineBottom = LAYOUT.canvasHeight - LAYOUT.bottomMargin;
+            const lineHeight = lineBottom - lineTop;
+
+            const getColX = (colIndex) => count > 1 ? LAYOUT.sideMargin + colIndex * colSpacing : requiredWidth / 2;
+            const getY = (yRatio) => lineTop + yRatio * lineHeight;
+            const getYRatio = (yPixel) => Math.max(0.05, Math.min(0.95, (yPixel - lineTop) / lineHeight));
+
+            return {
+                width: requiredWidth,
+                height: LAYOUT.canvasHeight,
+                count,
+                colSpacing,
+                lineTop,
+                lineBottom,
+                lineHeight,
+                getColX,
+                getY,
+                getYRatio
+            };
+        }
+
+        // 調整 Canvas 尺寸並重繪
+        function resizeAndDraw() {
+            const geo = getCanvasGeometry();
+            const dpr = window.devicePixelRatio || 1;
+            
+            // 應用縮放倍率到實際 Canvas 的長寬
+            const zoomedWidth = geo.width * currentZoom;
+            const zoomedHeight = geo.height * currentZoom;
+
+            canvas.width = zoomedWidth * dpr;
+            canvas.height = zoomedHeight * dpr;
+            canvas.style.width = zoomedWidth + 'px';
+            canvas.style.height = zoomedHeight + 'px';
+            
+            // 設定縮放變形矩陣
+            ctx.setTransform(dpr * currentZoom, 0, 0, dpr * currentZoom, 0, 0);
+            drawCanvas();
+        }
+
+        // 主繪圖函式
+        function drawCanvas() {
+            const geo = getCanvasGeometry();
+            const group = getCurrentGroup();
+            ctx.clearRect(0, 0, geo.width, geo.height);
+
+            // 1. 繪製背景淡網格
+            ctx.save();
+            ctx.strokeStyle = '#f1f5f9';
+            ctx.lineWidth = 1;
+            for (let y = geo.lineTop; y <= geo.lineBottom; y += 30) {
+                ctx.beginPath();
+                ctx.moveTo(20, y);
+                ctx.lineTo(geo.width - 20, y);
+                ctx.stroke();
+            }
+            ctx.restore();
+
+            // 2. 繪製神秘盲抽遮罩或綠線 (橫線)
+            if (state.hideRungs) {
+                ctx.save();
+                ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
+                ctx.beginPath();
+                ctx.roundRect(
+                     LAYOUT.sideMargin - 30,
+                    geo.lineTop + 15,
+                    geo.width - (LAYOUT.sideMargin - 30) * 2,
+                    geo.lineHeight - 30,
+                    16
+                );
+                ctx.fill();
+
+                ctx.fillStyle = '#f8fafc';
+                ctx.font = 'bold 20px "Noto Sans TC"';
+                ctx.textAlign = 'center';
+                ctx.fillText('🔒 神秘盲抽模式 (橫線已隱藏)', geo.width / 2, geo.lineTop + geo.lineHeight / 2 - 5);
+                ctx.font = '13px "Noto Sans TC"';
+                ctx.fillStyle = '#cbd5e1';
+                ctx.fillText('點擊上方姓名或「全部路線揭曉」直接看結果，或取消勾選隱藏橫線', geo.width / 2, geo.lineTop + geo.lineHeight / 2 + 22);
+                ctx.restore();
+            } else {
+                // 繪製所有綠色橫線
+                ctx.save();
+                group.rungs.forEach((rung) => {
+                    if (rung.col >= 0 && rung.col < geo.count - 1) {
+                        const x1 = geo.getColX(rung.col);
+                        const x2 = geo.getColX(rung.col + 1);
+                        const y = geo.getY(rung.yRatio);
+
+                        ctx.strokeStyle = '#16a34a'; // 鮮明綠線 (呼應照片)
+                        ctx.lineWidth = 5;
+                        ctx.lineCap = 'round';
+                        ctx.beginPath();
+                        ctx.moveTo(x1, y);
+                        ctx.lineTo(x2, y);
+                        ctx.stroke();
+                    }
+                });
+                ctx.restore();
+            }
+
+            // 3. 繪製直向主線 (紅線，呼應照片)
+            ctx.save();
+            for (let i = 0; i < geo.count; i++) {
+                const x = geo.getColX(i);
+                ctx.strokeStyle = '#ef4444'; // 鮮紅直線
+                ctx.lineWidth = 5;
+                ctx.lineCap = 'round';
+                ctx.beginPath();
+                ctx.moveTo(x, geo.lineTop);
+                ctx.lineTo(x, geo.lineBottom);
+                ctx.stroke();
+
+                // 轉角與端點裝飾圓點
+                ctx.fillStyle = '#dc2626';
+                ctx.beginPath();
+                ctx.arc(x, geo.lineTop, 4, 0, Math.PI * 2);
+                ctx.arc(x, geo.lineBottom, 4, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.restore();
+
+            // 4. 若在「編輯橫線」模式且滑鼠懸停，顯示預覽虛線或刪除提示
+            if (state.mode === 'edit' && state.hoverRung && !state.hideRungs) {
+                const { col, yRatio, existingIndex } = state.hoverRung;
+                const x1 = geo.getColX(col);
+                const x2 = geo.getColX(col + 1);
+                const y = geo.getY(yRatio);
+
+                ctx.save();
+                if (existingIndex !== -1) {
+                    // 提示點擊可刪除
+                    ctx.strokeStyle = '#f43f5e';
+                    ctx.lineWidth = 8;
+                    ctx.beginPath();
+                    ctx.moveTo(x1, y);
+                    ctx.lineTo(x2, y);
+                    ctx.stroke();
+
+                    ctx.fillStyle = '#e11d48';
+                    ctx.beginPath();
+                    ctx.arc((x1 + x2) / 2, y, 12, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.fillStyle = '#ffffff';
+                    ctx.font = 'bold 13px sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText('✕', (x1 + x2) / 2, y);
+                } else {
+                    // 提示點擊可新增綠線
+                    ctx.strokeStyle = 'rgba(22, 163, 74, 0.55)';
+                    ctx.lineWidth = 5;
+                    ctx.setLineDash([6, 6]);
+                    ctx.beginPath();
+                    ctx.moveTo(x1, y);
+                    ctx.lineTo(x2, y);
+                    ctx.stroke();
+
+                    ctx.fillStyle = '#16a34a';
+                    ctx.beginPath();
+                    ctx.arc((x1 + x2) / 2, y, 11, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.fillStyle = '#ffffff';
+                    ctx.font = 'bold 14px sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText('+', (x1 + x2) / 2, y);
+                }
+                ctx.restore();
+            }
+
+            // 5. 繪製已完成的路線 (電腦或手動完成)
+            Object.values(state.completedPaths).forEach((pathObj) => {
+                const isSelected = state.selectedAutoCol === pathObj.startCol;
+                const isDimmed = state.selectedAutoCol !== null && !isSelected;
+
+                ctx.save();
+                ctx.strokeStyle = pathObj.color;
+                ctx.lineWidth = isSelected ? 8 : 5;
+                ctx.globalAlpha = isDimmed ? 0.22 : 0.95;
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+
+                if (isSelected) {
+                    ctx.shadowColor = pathObj.color;
+                    ctx.shadowBlur = 10;
+                }
+
+                ctx.beginPath();
+                if (pathObj.isManual && pathObj.rawPoints) {
+                    // 手動繪製的自由曲線
+                    pathObj.rawPoints.forEach((pt, idx) => {
+                        if (idx === 0) ctx.moveTo(pt.x, pt.y);
+                        else ctx.lineTo(pt.x, pt.y);
+                    });
+                } else if (pathObj.pathRatios) {
+                    // 電腦標準幾何路線
+                    pathObj.pathRatios.forEach((node, idx) => {
+                        const px = geo.getColX(node.col);
+                        const py = geo.getY(node.yRatio);
+                        if (idx === 0) ctx.moveTo(px, py);
+                        else ctx.lineTo(px, py);
+                    });
+                }
+                ctx.stroke();
+                ctx.restore();
+            });
+
+            // 6. 繪製正在進行中的電腦走線動畫
+            state.activeAnimations.forEach((anim) => {
+                ctx.save();
+                ctx.strokeStyle = anim.color;
+                ctx.lineWidth = 7;
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+                ctx.shadowColor = anim.color;
+                ctx.shadowBlur = 8;
+
+                ctx.beginPath();
+                for (let i = 0; i <= anim.currentSegment; i++) {
+                    const pt = anim.pixelPoints[i];
+                    if (i === 0) ctx.moveTo(pt.x, pt.y);
+                    else ctx.lineTo(pt.x, pt.y);
+                }
+                // 畫到目前插值位置
+                ctx.lineTo(anim.headX, anim.headY);
+                ctx.stroke();
+
+                // 繪製領頭光點
+                ctx.fillStyle = '#ffffff';
+                ctx.strokeStyle = anim.color;
+                ctx.lineWidth = 4;
+                ctx.beginPath();
+                ctx.arc(anim.headX, anim.headY, 7, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+                ctx.restore();
+            });
+
+            // 7. 繪製正在手動連連看的軌跡
+            if (state.manualDraw.isDrawing && state.manualDraw.points.length > 0) {
+                ctx.save();
+                ctx.strokeStyle = state.manualDraw.color;
+                ctx.lineWidth = 6;
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+                ctx.beginPath();
+                state.manualDraw.points.forEach((pt, idx) => {
+                    if (idx === 0) ctx.moveTo(pt.x, pt.y);
+                    else ctx.lineTo(pt.x, pt.y);
+                });
+                ctx.stroke();
+                ctx.restore();
+            }
+
+            // 8. 繪製頂部「同學姓名」方塊與底部「目的地號碼/品項」方塊
+            for (let i = 0; i < geo.count; i++) {
+                const x = geo.getColX(i);
+                const color = PATH_COLORS[i % PATH_COLORS.length];
+                const isStartDone = Boolean(state.completedPaths[i]);
+                const isSelected = state.selectedAutoCol === i;
+
+                // --- 頂部姓名方塊 ---
+                const nameY = geo.lineTop - 48;
+                const isNameMasked = state.hideNames && !state.revealedNames[i];
+                const displayName = isNameMasked ? `❓ 隱藏 ${i + 1}` : group.names[i];
+
+                let unarrivedNameColor = isNameMasked ? '#64748b' : '#1e293b';
+                if (!isNameMasked && !isSelected) {
+                    if (displayName.includes('♥') || displayName.includes('♦')) {
+                        unarrivedNameColor = '#dc2626'; // 紅色系花色
+                    } else if (displayName.includes('♠') || displayName.includes('♣')) {
+                        unarrivedNameColor = '#0f172a'; // 黑色系花色
+                    }
+                }
+
+                ctx.save();
+                ctx.fillStyle = isSelected ? color : (isStartDone ? '#f8fafc' : '#ffffff');
+                ctx.strokeStyle = isSelected || isStartDone ? color : '#cbd5e1';
+                ctx.lineWidth = isSelected || isStartDone ? 3 : 2;
+                ctx.beginPath();
+                ctx.roundRect(x - LAYOUT.boxWidth / 2, nameY, LAYOUT.boxWidth, LAYOUT.boxHeight, 10);
+                ctx.fill();
+                ctx.stroke();
+
+                ctx.fillStyle = isSelected ? '#ffffff' : (isStartDone ? '#94a3b8' : unarrivedNameColor);
+                ctx.font = 'bold 14px "Noto Sans TC"';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText( fitText(ctx, displayName, LAYOUT.boxWidth - 10), x, nameY + LAYOUT.boxHeight / 2 );
+                ctx.restore();
+
+                // --- 底部號碼/品項方塊 ---
+                const prizeY = geo.lineBottom + 12;
+                const matchedStartCol = Object.values(state.completedPaths).find(p => p.endCol === i)?.startCol;
+                const hasArrived = matchedStartCol !== undefined;
+                const arrivalColor = hasArrived ? PATH_COLORS[matchedStartCol % PATH_COLORS.length] : '#94a3b8';
+                const isPrizeMasked = state.hidePrizes && !state.revealedPrizes[i];
+                const rawPrize = group.prizes[i] !== undefined ? group.prizes[i] : String(i + 1);
+                const displayPrize = isPrizeMasked ? '🎁 點擊翻開' : rawPrize;
+
+                let unarrivedTextColor = '#92400e';
+                if (!isPrizeMasked) {
+                    if (displayPrize.includes('♥') || displayPrize.includes('♦')) {
+                        unarrivedTextColor = '#dc2626'; // 紅色系花色
+                    } else if (displayPrize.includes('♠') || displayPrize.includes('♣')) {
+                        unarrivedTextColor = '#0f172a'; // 黑色系花色
+                    }
+                }
+
+                ctx.save();
+                ctx.fillStyle = hasArrived ? arrivalColor : '#fffbeb';
+                ctx.strokeStyle = hasArrived ? arrivalColor : '#fcd34d';
+                ctx.lineWidth = hasArrived ? 3 : 2;
+                ctx.beginPath();
+                ctx.roundRect(x - LAYOUT.boxWidth / 2, prizeY, LAYOUT.boxWidth, LAYOUT.boxHeight, 10);
+                ctx.fill();
+                ctx.stroke();
+
+                ctx.fillStyle = hasArrived ? '#ffffff' : (isPrizeMasked ? '#b45309' : unarrivedTextColor);
+                ctx.font = isPrizeMasked ? 'bold 12px "Noto Sans TC"' : 'bold 16px "Noto Sans TC"';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText( fitText(ctx, displayPrize, LAYOUT.boxWidth - 10), x, prizeY + LAYOUT.boxHeight / 2 );
+                ctx.restore();
+            }
+        }
+
+        // 截斷過長文字以符合方塊寬度
+        function fitText(context, text, maxWidth) {
+            if (context.measureText(text).width <= maxWidth) return text;
+            let shortened = text;
+            while (shortened.length > 1 && context.measureText(shortened + '…').width > maxWidth) {
+                shortened = shortened.slice(0, -1);
+            }
+            return shortened + '…';
+        }
+
+        // 啟動單一同學的電腦走線動畫 (支援雙向)
+        function startAutoTraceAnimation(startCol, isReverse = false, onComplete = null) {
+            const geo = getCanvasGeometry();
+            const pathInfo = calculatePathForColumn(startCol);
+            const color = PATH_COLORS[startCol % PATH_COLORS.length];
+
+            // 若已經有該同學正在跑的動畫，先移除
+            state.activeAnimations = state.activeAnimations.filter(a => a.startCol !== startCol);
+            delete state.completedPaths[startCol];
+
+            const pixelPoints = pathInfo.pathRatios.map(pt => ({
+                x: geo.getColX(pt.col),
+                y: geo.getY(pt.yRatio)
+            }));
+
+            // 若為反向查找，則將座標點陣列顛倒，動畫就會由下往上畫
+            if (isReverse) {
+                pixelPoints.reverse();
+            }
+
+            const animObj = {
+                startCol,
+                endCol: pathInfo.endCol,
+                pathRatios: pathInfo.pathRatios,
+                pixelPoints,
+                color,
+                currentSegment: 0,
+                segmentProgress: 0,
+                headX: pixelPoints[0].x,
+                headY: pixelPoints[0].y,
+                speedPxPerFrame: 9.5,
+                onComplete
+            };
+
+            state.activeAnimations.push(animObj);
+            updateAnimationStatusUI();
+            requestAnimationFrame(stepAnimations);
+        }
+
+        // 動畫影格步進
+        let isAnimationLoopRunning = false;
+        function stepAnimations() {
+            if (state.activeAnimations.length === 0) {
+                isAnimationLoopRunning = false;
+                updateAnimationStatusUI();
+                drawCanvas();
+                return;
+            }
+            isAnimationLoopRunning = true;
+
+            const finishedList = [];
+
+            state.activeAnimations.forEach((anim) => {
+                const p1 = anim.pixelPoints[anim.currentSegment];
+                const p2 = anim.pixelPoints[anim.currentSegment + 1];
+                const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+
+                if (dist < 0.5) {
+                    anim.currentSegment++;
+                } else {
+                    anim.segmentProgress += anim.speedPxPerFrame / dist;
+                    if (anim.segmentProgress >= 1) {
+                        anim.segmentProgress = 0;
+                        anim.currentSegment++;
+                    }
+                }
+
+                if (anim.currentSegment >= anim.pixelPoints.length - 1) {
+                    const lastPt = anim.pixelPoints[anim.pixelPoints.length - 1];
+                    anim.headX = lastPt.x;
+                    anim.headY = lastPt.y;
+                    finishedList.push(anim);
+                } else {
+                    const curP1 = anim.pixelPoints[anim.currentSegment];
+                    const curP2 = anim.pixelPoints[anim.currentSegment + 1];
+                    anim.headX = curP1.x + (curP2.x - curP1.x) * anim.segmentProgress;
+                    anim.headY = curP1.y + (curP2.y - curP1.y) * anim.segmentProgress;
+                }
+            });
+
+            // 處理已抵達終點的路線
+            if (finishedList.length > 0) {
+                finishedList.forEach((doneAnim) => {
+                    state.completedPaths[doneAnim.startCol] = {
+                        startCol: doneAnim.startCol,
+                        endCol: doneAnim.endCol,
+                        pathRatios: doneAnim.pathRatios,
+                        color: doneAnim.color,
+                        isManual: false
+                    };
+                    // 自動翻開對應的起點與終點遮罩
+                    state.revealedNames[doneAnim.startCol] = true;
+                    state.revealedPrizes[doneAnim.endCol] = true;
+                    if (typeof doneAnim.onComplete === 'function') doneAnim.onComplete();
+                });
+
+                state.activeAnimations = state.activeAnimations.filter(a => !finishedList.includes(a));
+                renderResultsSummary();
+                updateAnimationStatusUI();
+            }
+
+            drawCanvas();
+
+            if (state.activeAnimations.length > 0) {
+                requestAnimationFrame(stepAnimations);
+            } else {
+                isAnimationLoopRunning = false;
+            }
+        }
+
+        function updateAnimationStatusUI() {
+            const badge = document.getElementById('drawingStatusBadge');
+            if (state.activeAnimations.length > 0) {
+                badge.classList.remove('hidden');
+            } else {
+                badge.classList.add('hidden');
+            }
+        }
+
+        // 同步左側與下方所有 UI 清單
+        function syncUIFromState() {
+            const group = getCurrentGroup();
+
+            // 更新頂部徽章與下拉選單
+            document.getElementById('currentGroupBadge').textContent = group.groupName;
+            const groupSelect = document.getElementById('groupSelect');
+            groupSelect.innerHTML = '';
+            state.groups.forEach((g, idx) => {
+                const opt = document.createElement('option');
+                opt.value = idx;
+                opt.textContent = `${g.groupName} (${g.names.length}人)`;
+                if (idx === state.currentGroupIndex) opt.selected = true;
+                groupSelect.appendChild(opt);
+            });
+
+            // 更新人數與橫線數量顯示
+            document.getElementById('participantCount').textContent = group.names.length;
+            document.getElementById('rungCountBadge').textContent = `${group.rungs.length} 條`;
+            document.getElementById('sliderRungCount').value = group.rungs.length;
+            document.getElementById('inputRungCount').value = group.rungs.length;
+
+            // 更新遮蔽核取方塊
+            document.getElementById('chkHideNames').checked = state.hideNames;
+            document.getElementById('chkHidePrizes').checked = state.hidePrizes;
+            document.getElementById('chkHideRungs').checked = state.hideRungs;
+
+            renderNamesList();
+            renderPrizesList();
+            renderResultsSummary();
+        }
+
+        // 渲染左側同學姓名列表 (可上下移動順序、改名、刪除)
+        function renderNamesList() {
+            const group = getCurrentGroup();
+            const listEl = document.getElementById('namesList');
+            listEl.innerHTML = '';
+
+            group.names.forEach((name, idx) => {
+                const color = PATH_COLORS[idx % PATH_COLORS.length];
+                const isRed = name.includes('♥') || name.includes('♦');
+                const textColorClass = isRed ? 'text-rose-600 font-bold' : (name.includes('♠') || name.includes('♣') ? 'text-slate-900 font-bold' : 'text-slate-800');
+                
+                const li = document.createElement('li');
+                li.className = 'flex items-center gap-1.5 bg-slate-50 p-1.5 rounded-lg border border-slate-200';
+                li.innerHTML = `
+                    <span class="w-5 h-5 rounded-full text-white text-xs font-bold flex items-center justify-center shrink-0" style="background-color: ${color}">
+                        ${idx + 1}
+                    </span>
+                    <input type="text" data-index="${idx}" value="${state.hideNames ? '****' : name}" ${state.hideNames ? 'disabled' : ''} 
+                        class="name-edit-input flex-1 bg-white border border-slate-200 rounded px-2 py-1 text-sm font-medium ${textColorClass} focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                    <button data-action="up" data-index="${idx}" class="p-1 text-slate-400 hover:text-slate-700 disabled:opacity-30" ${idx === 0 ? 'disabled' : ''} title="上移">
+                        <i class="fa-solid fa-arrow-up text-xs"></i>
+                    </button>
+                    <button data-action="down" data-index="${idx}" class="p-1 text-slate-400 hover:text-slate-700 disabled:opacity-30" ${idx === group.names.length - 1 ? 'disabled' : ''} title="下移">
+                        <i class="fa-solid fa-arrow-down text-xs"></i>
+                    </button>
+                    <button data-action="delete" data-index="${idx}" class="p-1 text-rose-400 hover:text-rose-600 disabled:opacity-30" ${group.names.length <= 2 ? 'disabled' : ''} title="刪除">
+                        <i class="fa-solid fa-xmark text-sm"></i>
+                    </button>
+                `;
+                listEl.appendChild(li);
+            });
+
+            // 綁定姓名修改事件
+            listEl.querySelectorAll('.name-edit-input').forEach(input => {
+                input.addEventListener('input', (e) => {
+                    const i = parseInt(e.target.dataset.index, 10);
+                    group.names[i] = e.target.value.trim() || `同學${i + 1}`;
+                    drawCanvas();
+                    renderResultsSummary();
+                });
+            });
+
+            // 綁定上移、下移、刪除按鈕
+            listEl.querySelectorAll('button[data-action]').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const action = e.currentTarget.dataset.action;
+                    const idx = parseInt(e.currentTarget.dataset.index, 10);
+                    clearDrawnPaths();
+
+                    if (action === 'up' && idx > 0) {
+                        [group.names[idx - 1], group.names[idx]] = [group.names[idx], group.names[idx - 1]];
+                    } else if (action === 'down' && idx < group.names.length - 1) {
+                        [group.names[idx + 1], group.names[idx]] = [group.names[idx], group.names[idx + 1]];
+                    } else if (action === 'delete' && group.names.length > 2) {
+                        group.names.splice(idx, 1);
+                        group.prizes.splice(idx, 1);
+                        // 清理超出範圍的橫線
+                        group.rungs = group.rungs.filter(r => r.col < group.names.length - 1);
+                    }
+                    syncUIFromState();
+                    resizeAndDraw();
+                });
+            });
+        }
+
+        // 渲染左側底部號碼/品項列表
+        function renderPrizesList() {
+            const group = getCurrentGroup();
+            const listEl = document.getElementById('prizesList');
+            listEl.innerHTML = '';
+
+            // 確保 prizes 長度與 names 一致
+            while (group.prizes.length < group.names.length) {
+                group.prizes.push(String(group.prizes.length + 1));
+            }
+
+            group.prizes.slice(0, group.names.length).forEach((prize, idx) => {
+                const isRed = prize.includes('♥') || prize.includes('♦');
+                const textColorClass = isRed ? 'text-rose-600' : (prize.includes('♠') || prize.includes('♣') ? 'text-slate-900' : 'text-slate-700');
+
+                const li = document.createElement('li');
+                li.className = 'flex items-center gap-2 bg-amber-50/60 p-1.5 rounded-lg border border-amber-200';
+                li.innerHTML = `
+                    <span class="text-xs font-bold text-amber-800 bg-amber-200 px-2 py-1 rounded">終點 ${idx + 1}</span>
+                    <input type="text" data-index="${idx}" value="${state.hidePrizes ? '****' : prize}" ${state.hidePrizes ? 'disabled' : ''}
+                        placeholder="輸入號碼或獎品..."
+                        class="prize-edit-input flex-1 bg-white border border-amber-300 rounded px-2.5 py-1 text-sm font-bold ${textColorClass} focus:outline-none focus:ring-1 focus:ring-amber-500">
+                `;
+                listEl.appendChild(li);
+            });
+
+            listEl.querySelectorAll('.prize-edit-input').forEach(input => {
+                input.addEventListener('input', (e) => {
+                    const i = parseInt(e.target.dataset.index, 10);
+                    group.prizes[i] = e.target.value;
+                    drawCanvas();
+                    renderResultsSummary();
+                });
+            });
+        }
+
+        // 渲染下方配對結果卡片
+        function renderResultsSummary() {
+            const group = getCurrentGroup();
+            const grid = document.getElementById('resultsGrid');
+            grid.innerHTML = '';
+
+            group.names.forEach((name, idx) => {
+                const color = PATH_COLORS[idx % PATH_COLORS.length];
+                const completed = state.completedPaths[idx];
+                const isSelected = state.selectedAutoCol === idx;
+
+                const isNameHidden = state.hideNames && !state.revealedNames[idx];
+                const shownName = isNameHidden ? `隱藏 ${idx + 1}` : name;
+
+                let prizeText = '尚未揭曉';
+                let badgeClass = 'bg-slate-100 text-slate-400 border-slate-200';
+
+                if (completed) {
+                    const endCol = completed.endCol;
+                    const isPrizeHidden = state.hidePrizes && !state.revealedPrizes[endCol];
+                    const rawPrize = group.prizes[endCol] !== undefined ? group.prizes[endCol] : String(endCol + 1);
+                    prizeText = isPrizeHidden ? '🎁 隱藏' : rawPrize;
+                    badgeClass = 'bg-amber-50 text-amber-800 border-amber-300 font-black';
+                }
+
+                const card = document.createElement('div');
+                card.className = `p-2.5 rounded-xl border transition cursor-pointer flex flex-col justify-between gap-1.5 ${
+                    isSelected ? 'ring-2 ring-indigo-500 bg-indigo-50/40 border-indigo-300' : 'bg-slate-50/70 hover:bg-slate-100 border-slate-200'
+                }`;
+                card.innerHTML = `
+                    <div class="flex items-center gap-1.5">
+                        <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background-color: ${color}"></span>
+                        <span class="text-xs font-bold text-slate-700 truncate">${shownName}</span>
+                    </div>
+                    <div class="flex items-center justify-between border px-2 py-1 rounded-lg text-sm ${badgeClass}">
+                        <i class="fa-solid fa-arrow-right text-[10px] opacity-60"></i>
+                        <span class="truncate">${prizeText}</span>
+                    </div>
+                `;
+
+                // 點擊結果卡片可高亮該同學路線或直接啟動他的走線
+                card.addEventListener('click', () => {
+                    if (state.completedPaths[idx]) {
+                        state.selectedAutoCol = state.selectedAutoCol === idx ? null : idx;
+                        drawCanvas();
+                        renderResultsSummary();
+                    } else {
+                        state.selectedAutoCol = idx;
+                        startAutoTraceAnimation(idx);
+                    }
+                });
+
+                grid.appendChild(card);
+            });
+        }
+
+        // 清除所有已畫出的路線
+        function clearDrawnPaths() {
+            state.activeAnimations = [];
+            state.completedPaths = {};
+            state.selectedAutoCol = null;
+            state.manualDraw.isDrawing = false;
+            state.manualDraw.points = [];
+            updateAnimationStatusUI();
+            drawCanvas();
+            renderResultsSummary();
+        }
+
+        // 隨機生成指定數量的橫線 (避免相鄰橫線在同一高度重疊造成歧義)
+        function generateRandomRungs(targetCount) {
+            const group = getCurrentGroup();
+            const cols = group.names.length - 1;
+            if (cols <= 0) return;
+
+            clearDrawnPaths();
+            const newRungs = [];
+            const minGap = 0.045; // 最小高度間距避免水平重疊
+            let attempts = 0;
+
+            while (newRungs.length < targetCount && attempts < 600) {
+                attempts++;
+                const col = Math.floor(Math.random() * cols);
+                const yRatio = Number((0.10 + Math.random() * 0.80).toFixed(3));
+
+                // 檢查同欄或左右相鄰欄是否有高度太接近的橫線
+                const conflict = newRungs.some(r => 
+                    Math.abs(r.col - col) <= 1 && Math.abs(r.yRatio - yRatio) < minGap
+                );
+
+                if (!conflict) {
+                    newRungs.push({ col, yRatio });
+                }
+            }
+
+            newRungs.sort((a, b) => a.yRatio - b.yRatio);
+            group.rungs = newRungs;
+            syncUIFromState();
+            drawCanvas();
+        }
+
+        // 取得滑鼠或觸控在 Canvas 上的座標
+        function getCanvasPointerPos(evt) {
+            const rect = canvas.getBoundingClientRect();
+            const clientX = evt.touches ? evt.touches[0].clientX : evt.clientX;
+            const clientY = evt.touches ? evt.touches[0].clientY : evt.clientY;
+            return {
+                x: (clientX - rect.left) / currentZoom,
+                y: (clientY - rect.top) / currentZoom
+            };
+        }
+
+        // 切換互動模式
+        function setInteractionMode(newMode) {
+            state.mode = newMode;
+            state.hoverRung = null;
+            document.querySelectorAll('.mode-btn').forEach(btn => {
+                if (btn.dataset.mode === newMode) {
+                    btn.className = 'mode-btn active flex-1 sm:flex-initial px-3 py-1.5 rounded-lg text-sm font-bold bg-indigo-600 text-white shadow-sm transition flex items-center justify-center gap-1.5';
+                } else {
+                    btn.className = 'mode-btn flex-1 sm:flex-initial px-3 py-1.5 rounded-lg text-sm font-bold text-slate-600 hover:text-slate-900 transition flex items-center justify-center gap-1.5';
+                }
+            });
+
+            const instructionText = document.getElementById('modeInstructionText');
+            if (newMode === 'auto') {
+                instructionText.textContent = '【電腦走線模式】點擊「姓名」可由上往下連線；點擊底部「號碼/品項」可由下往上反查是哪位同學喔！';
+                canvas.style.cursor = 'pointer';
+            } else if (newMode === 'draw') {
+                instructionText.textContent = '【手動連連看模式】請從上方任一同學姓名方塊按住滑鼠（或手指拖曳）往下畫線，到底部號碼方塊放開即可完成配對！';
+                canvas.style.cursor = 'crosshair';
+            } else if (newMode === 'edit') {
+                instructionText.textContent = '【點擊增減橫線模式】將滑鼠移到任兩條紅線中間點擊即可「新增綠線」，點擊現有的綠線即可將其「刪除」。';
+                canvas.style.cursor = 'cell';
+            }
+            drawCanvas();
+        }
+
+        // 自訂彈窗工具函式
+        function openCustomModal({ title, htmlContent, showCancel = true, confirmText = '確定', onConfirm, onClose }) {
+            const modal = document.getElementById('customModal');
+            document.getElementById('modalTitle').textContent = title;
+            document.getElementById('modalBody').innerHTML = htmlContent;
+            document.getElementById('btnModalCancel').style.display = showCancel ? 'inline-block' : 'none';
+            document.getElementById('btnModalConfirm').textContent = confirmText;
+
+            modal.classList.remove('hidden');
+
+            const close = () => {
+                if (typeof onClose === 'function') onClose();
+                modal.classList.add('hidden');
+            };
+            document.getElementById('btnCloseModal').onclick = close;
+            document.getElementById('btnModalCancel').onclick = close;
+            document.getElementById('btnModalConfirm').onclick = () => {
+                if (onConfirm) {
+                    const shouldClose = onConfirm();
+                    if (shouldClose !== false) close();
+                } else {
+                    close();
+                }
+            };
+        }
+
+        // 全域相機串流控制變數
+        let activeCameraStream = null;
+        let currentFacingMode = 'environment'; // 預設使用後置鏡頭
+
+        function stopActiveCamera() {
+            if (activeCameraStream) {
+                activeCameraStream.getTracks().forEach(track => track.stop());
+                activeCameraStream = null;
+            }
+            const camContainer = document.getElementById('liveCameraContainer');
+            if (camContainer) camContainer.classList.add('hidden');
+        }
+
+        async function startLiveCamera(facingMode = 'environment') {
+            stopActiveCamera();
+            currentFacingMode = facingMode;
+            const camContainer = document.getElementById('liveCameraContainer');
+            const videoEl = document.getElementById('liveCameraVideo');
+            const camErrorMsg = document.getElementById('cameraFallbackHint');
+
+            if (!camContainer || !videoEl) return;
+
+            try {
+                const constraints = {
+                    video: {
+                        facingMode: { ideal: facingMode },
+                        width: { ideal: 1920 },
+                        height: { ideal: 1080 }
+                    },
+                    audio: false
+                };
+                activeCameraStream = await navigator.mediaDevices.getUserMedia(constraints);
+                videoEl.srcObject = activeCameraStream;
+                await videoEl.play();
+                camContainer.classList.remove('hidden');
+                if (camErrorMsg) camErrorMsg.classList.add('hidden');
+            } catch (err) {
+                // 若瀏覽器不支援 WebRTC 或未授權相機，則自動觸發原生拍照 input
+                if (camErrorMsg) camErrorMsg.classList.remove('hidden');
+                const nativeCamInput = document.getElementById('fileCameraCapture');
+                if (nativeCamInput) nativeCamInput.click();
+            }
+        }
+
+        // 綁定所有 UI 與 Canvas 事件
+        function bindEvents() {
+            // 左側頁籤切換
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.tab-btn').forEach(b => {
+                        b.classList.remove('active', 'bg-white', 'text-indigo-600', 'shadow-sm');
+                    });
+                    btn.classList.add('active', 'bg-white', 'text-indigo-600', 'shadow-sm');
+
+                    const targetId = btn.dataset.tab;
+                    document.querySelectorAll('.tab-content').forEach(panel => {
+                        panel.classList.toggle('hidden', panel.id !== targetId);
+                    });
+                });
+            });
+
+            // 行動裝置展開/收合設定面板
+            document.getElementById('btnToggleSidebar').addEventListener('click', () => {
+                const panel = document.getElementById('sidebarPanel');
+                panel.classList.toggle('hidden');
+            });
+
+            // 切換互動模式按鈕
+            document.querySelectorAll('.mode-btn').forEach(btn => {
+                btn.addEventListener('click', () => setInteractionMode(btn.dataset.mode));
+            });
+
+            // 還原預設配置按鈕
+            document.getElementById('btnRestoreDefault').addEventListener('click', () => {
+                clearDrawnPaths();
+                state.groups[0] = {
+                    id: 'default-class-group-' + Date.now(),
+                    groupName: '內建群組 (20人)',
+                    names: Array.from({length: 20}, (_, i) => String(i + 1)),
+                    prizes: Array.from({length: 20}, (_, i) => String(i + 1)),
+                    rungs: createInitialRungs(19, 30)
+                };
+                state.currentGroupIndex = 0;
+                state.hideNames = false;
+                state.hidePrizes = false;
+                state.hideRungs = false;
+                syncUIFromState();
+                resizeAndDraw();
+                showToast('已還原為內建的 20 人配置！');
+            });
+
+            // 組別切換
+            document.getElementById('groupSelect').addEventListener('change', (e) => {
+                clearDrawnPaths();
+                state.currentGroupIndex = parseInt(e.target.value, 10);
+                syncUIFromState();
+                resizeAndDraw();
+            });
+
+            // 新增組別
+            document.getElementById('btnNewGroup').addEventListener('click', () => {
+                openCustomModal({
+                    title: '新增組別',
+                    htmlContent: `
+                        <div class="space-y-3">
+                            <div>
+                                <label class="block text-xs font-bold text-slate-600 mb-1">組別名稱</label>
+                                <input type="text" id="modalGroupName" value="第 ${state.groups.length + 1} 組" class="w-full border border-slate-300 rounded-lg px-3 py-1.5 text-sm">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-slate-600 mb-1">成員名單 (以空白、逗號或換行分隔)</label>
+                                <textarea id="modalGroupMembers" rows="4" class="w-full border border-slate-300 rounded-lg px-3 py-1.5 text-sm">陳宥銓, 許景棠, 古曉潔, 沈祺敦, 劉品彣, 柳均霖, 楊羽琋</textarea>
+                            </div>
+                        </div>
+                    `,
+                    confirmText: '建立組別',
+                    onConfirm: () => {
+                        const gName = document.getElementById('modalGroupName').value.trim() || `第 ${state.groups.length + 1} 組`;
+                        const rawMembers = document.getElementById('modalGroupMembers').value;
+                        const names = rawMembers.split(/[\s,，、\n]+/).map(s => s.trim()).filter(Boolean);
+                        if (names.length < 2) {
+                            showToast('至少需要 2 位同學才能建立鬼腳圖！');
+                            return false;
+                        }
+                        const prizes = names.map((_, idx) => String(idx + 1));
+                        state.groups.push({
+                            id: 'group-' + Date.now(),
+                            groupName: gName,
+                            names,
+                            prizes,
+                            rungs: []
+                        });
+                        state.currentGroupIndex = state.groups.length - 1;
+                        generateRandomRungs(Math.min(12, names.length * 2));
+                        syncUIFromState();
+                        resizeAndDraw();
+                        showToast(`已建立「${gName}」`);
+                    }
+                });
+            });
+
+            // 刪除目前組別
+            document.getElementById('btnDeleteGroup').addEventListener('click', () => {
+                const currentName = getCurrentGroup().groupName;
+                openCustomModal({
+                    title: '刪除組別確認',
+                    htmlContent: `<p>確定要刪除「<strong class="text-rose-600">${currentName}</strong>」嗎？</p>`,
+                    confirmText: '確定刪除',
+                    onConfirm: () => {
+                        state.groups.splice(state.currentGroupIndex, 1);
+                        if (state.groups.length === 0) {
+                            // 若全部刪除，建立一個預設空白組別
+                            state.groups.push({
+                                id: 'group-empty-' + Date.now(),
+                                groupName: '未命名組別',
+                                names: ['同學 A', '同學 B'],
+                                prizes: ['1', '2'],
+                                rungs: [{ col: 0, yRatio: 0.5 }]
+                            });
+                        }
+                        state.currentGroupIndex = Math.max(0, state.currentGroupIndex - 1);
+                        clearDrawnPaths();
+                        syncUIFromState();
+                        resizeAndDraw();
+                        showToast(`已刪除「${currentName}」`);
+                    }
+                });
+            });
+
+            // 編輯目前組別名稱與成員名單
+            document.getElementById('btnEditGroup').addEventListener('click', () => {
+                const group = getCurrentGroup();
+                openCustomModal({
+                    title: '編輯組別與名單',
+                    htmlContent: `
+                        <div class="space-y-3">
+                            <div>
+                                <label class="block text-xs font-bold text-slate-600 mb-1">組別名稱</label>
+                                <input type="text" id="modalEditGroupName" value="${group.groupName}" class="w-full border border-slate-300 rounded-lg px-3 py-1.5 text-sm">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-slate-600 mb-1">成員名單 (以空白、逗號或換行分隔)</label>
+                                <textarea id="modalEditGroupMembers" rows="5" class="w-full border border-slate-300 rounded-lg px-3 py-1.5 text-sm">${group.names.join('\n')}</textarea>
+                            </div>
+                        </div>
+                    `,
+                    confirmText: '儲存變更',
+                    onConfirm: () => {
+                        const newGName = document.getElementById('modalEditGroupName').value.trim() || group.groupName;
+                        const rawMembers = document.getElementById('modalEditGroupMembers').value;
+                        const newNames = rawMembers.split(/[\s,，、\n]+/).map(s => s.trim()).filter(Boolean);
+                        if (newNames.length < 2) {
+                            showToast('至少需要 2 位同學才能進行鬼腳圖喔！');
+                            return false;
+                        }
+                        clearDrawnPaths();
+                        group.groupName = newGName;
+                        const oldCount = group.names.length;
+                        group.names = newNames;
+                        if (newNames.length !== oldCount) {
+                            group.prizes = newNames.map((_, i) => group.prizes[i] !== undefined ? group.prizes[i] : String(i + 1));
+                            group.rungs = group.rungs.filter(r => r.col < newNames.length - 1);
+                        }
+                        syncUIFromState();
+                        resizeAndDraw();
+                        showToast(`已更新「${newGName}」`);
+                    }
+                });
+            });
+
+            // 批次匯入名單 (預設自動開啟即時相機拍照辨識 + 支援相簿圖片、PDF/Word/Excel)
+            document.getElementById('btnImportNames').addEventListener('click', () => {
+                openCustomModal({
+                    title: '拍照或檔案匯入名單',
+                    onClose: () => {
+                        stopActiveCamera();
+                    },
+                    htmlContent: `
+                        <div class="space-y-3">
+                            <!-- 頂部操作按鈕列：以「開啟相機直接拍」為預設主按鈕 -->
+                            <div class="bg-indigo-50/80 border border-indigo-200 rounded-xl p-3 space-y-2.5">
+                                <div class="grid grid-cols-2 gap-2">
+                                    <button type="button" id="btnOpenLiveCam" class="bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg py-2.5 px-3 text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm active:scale-95 transition ring-2 ring-indigo-300">
+                                        <i class="fa-solid fa-camera text-base"></i>
+                                        <span>開啟相機直接拍</span>
+                                    </button>
+
+                                    <label for="fileUploadAll" class="cursor-pointer bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-300 rounded-lg py-2.5 px-3 text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm active:scale-95 transition">
+                                        <i class="fa-solid fa-folder-open text-base"></i>
+                                        <span>從相簿 / 選取檔案</span>
+                                    </label>
+                                    <input type="file" id="fileUploadAll" accept="image/*,.pdf,.xlsx,.xls,.docx,.txt,.csv" class="hidden">
+                                    <!-- 備用原生相機 input -->
+                                    <input type="file" id="fileCameraCapture" accept="image/*" capture="environment" class="hidden">
+                                </div>
+
+                                <!-- 內建即時相機取景視窗 (開啟視窗時預設自動啟動) -->
+                                <div id="liveCameraContainer" class="hidden relative bg-slate-900 rounded-xl overflow-hidden border-2 border-indigo-500 shadow-inner">
+                                    <video id="liveCameraVideo" autoplay playsinline muted class="w-full max-h-56 object-cover bg-black"></video>
+                                    
+                                    <!-- 瞄準輔助框 -->
+                                    <div class=" inset-4 border border-dashed border-amber-300/70 rounded-lg pointer-events-none flex items-end justify-center pb-1">
+                                        <span class="bg-black/60 text-amber-200 text-[10px] px-2 py-0.5 rounded">請將手寫或印刷名單對準畫面中央</span>
+                                    </div>
+
+                                    <!-- 相機控制列 -->
+                                    <div class="bg-slate-900/90 p-2 flex items-center justify-between gap-2">
+                                        <button type="button" id="btnSwitchCam" class="text-white hover:text-amber-300 text-xs px-2.5 py-1.5 rounded bg-slate-800 flex items-center gap-1" title="切換前後鏡頭">
+                                            <i class="fa-solid fa-camera-rotate"></i> 切換鏡頭
+                                        </button>
+                                        <button type="button" id="btnSnapPhoto" class="flex-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs py-2 px-4 rounded-lg shadow flex items-center justify-center gap-1.5 active:scale-95 transition">
+                                            <i class="fa-solid fa-bolt"></i> 拍照並立即辨識
+                                        </button>
+                                        <button type="button" id="btnCloseLiveCam" class="text-slate-300 hover:text-white text-xs px-2.5 py-1.5 rounded bg-slate-800">
+                                            關閉
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <p id="cameraFallbackHint" class="hidden text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                                    <i class="fa-solid fa-circle-info mr-1"></i>若瀏覽器未允許直接取景，已為您喚起系統相機或檔案選擇器。
+                                </p>
+
+                                <!-- 辨識進度與影像預覽區 -->
+                                <div id="ocrStatusBox" class="hidden bg-white p-2.5 rounded-lg border border-indigo-200 flex items-center gap-3">
+                                    <img id="ocrPreviewThumb" class="hidden w-14 h-14 object-contain bg-slate-100 rounded border border-slate-200 shrink-0" alt="預覽">
+                                    <div class="flex-1 min-w-0">
+                                        <div id="ocrStatusTitle" class="text-xs font-bold text-indigo-600 flex items-center gap-1.5">
+                                            <i class="fa-solid fa-spinner fa-spin"></i>
+                                            <span>AI 正在深度辨識圖片中的姓名...</span>
+                                        </div>
+                                        <p id="ocrStatusSub" class="text-[11px] text-slate-500 truncate mt-0.5">支援手寫字跡、橫排名單與表格自動萃取</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- 辨識結果與手動文字編輯區 -->
+                            <div>
+                                <div class="flex justify-between items-center mb-1 flex-wrap gap-1">
+                                    <label class="text-xs font-bold text-slate-700">辨識出的名單 (可直接點擊修改)：</label>
+                                    <div class="flex gap-1">
+                                        <button type="button" id="btnFillSamplePhoto" class="text-[11px] text-amber-700 bg-amber-100 hover:bg-amber-200 px-2 py-0.5 rounded font-medium transition">
+                                            帶入黃紙範例
+                                        </button>
+                                        <button type="button" id="btnFillScreenshot" class="text-[11px] text-indigo-700 bg-indigo-100 hover:bg-indigo-200 px-2 py-0.5 rounded font-medium transition">
+                                            帶入截圖範例(振熙等)
+                                        </button>
+                                    </div>
+                                </div>
+                                <textarea id="modalImportNames" rows="5" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="拍照或選取檔案後，辨識出的姓名會自動填入此處（每行一位）..."></textarea>
+                            </div>
+
+                            <!-- 匯入方式選項 -->
+                            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+                                <label class="flex items-center gap-2 cursor-pointer">
+                                    <input type="radio" name="importMode" value="replace" class="accent-indigo-600" checked>
+                                    <span class="text-xs font-bold text-rose-600">取代現有名單 (建立新局)</span>
+                                </label>
+                                <label class="flex items-center gap-2 cursor-pointer">
+                                    <input type="radio" name="importMode" value="append" class="accent-indigo-600">
+                                    <span class="text-xs font-medium text-slate-700">加到現有名單後方</span>
+                                </label>
+                            </div>
+                        </div>
+                    `,
+                    confirmText: '確認匯入名單',
+                    onConfirm: () => {
+                        stopActiveCamera();
+                        const rawText = document.getElementById('modalImportNames').value;
+                        const newNames = rawText.split(/[\s,，、\n]+/).map(s => s.trim()).filter(Boolean);
+                        if (newNames.length === 0) {
+                            showToast('請先拍照辨識或輸入名單喔！');
+                            return false;
+                        }
+                        
+                        const group = getCurrentGroup();
+                        const mode = document.querySelector('input[name="importMode"]:checked').value;
+                        
+                        clearDrawnPaths();
+                        
+                        if (mode === 'replace') {
+                            if (newNames.length < 2) {
+                                showToast('完全取代時，至少需要 2 位同學！');
+                                return false;
+                            }
+                            group.names = newNames;
+                            group.prizes = newNames.map((_, i) => String(i + 1));
+                            group.rungs = [];
+                            generateRandomRungs(Math.min(12, newNames.length * 2));
+                        } else {
+                            newNames.forEach(n => {
+                                group.names.push(n);
+                                group.prizes.push(String(group.names.length));
+                            });
+                        }
+                        
+                        syncUIFromState();
+                        resizeAndDraw();
+                        showToast(`成功匯入 ${newNames.length} 位同學名單！`);
+                    }
+                });
+
+                // 預設自動開啟即時相機，並綁定拍照、切換鏡頭與檔案上傳事件
+                setTimeout(() => {
+                    const fileAll = document.getElementById('fileUploadAll');
+                    const fileCam = document.getElementById('fileCameraCapture');
+                    const btnSample = document.getElementById('btnFillSamplePhoto');
+                    const btnOpenLiveCam = document.getElementById('btnOpenLiveCam');
+                    const btnCloseLiveCam = document.getElementById('btnCloseLiveCam');
+                    const btnSwitchCam = document.getElementById('btnSwitchCam');
+                    const btnSnapPhoto = document.getElementById('btnSnapPhoto');
+
+                    // 打開彈窗時預設直接啟動相機！
+                    startLiveCamera('environment');
+
+                    if (btnOpenLiveCam) {
+                        btnOpenLiveCam.onclick = () => startLiveCamera(currentFacingMode);
+                    }
+                    if (btnCloseLiveCam) {
+                        btnCloseLiveCam.onclick = () => stopActiveCamera();
+                    }
+                    if (btnSwitchCam) {
+                        btnSwitchCam.onclick = () => {
+                            const nextMode = currentFacingMode === 'environment' ? 'user' : 'environment';
+                            startLiveCamera(nextMode);
+                        };
+                    }
+                    if (btnSnapPhoto) {
+                        btnSnapPhoto.onclick = async () => {
+                            const videoEl = document.getElementById('liveCameraVideo');
+                            if (!videoEl || !videoEl.videoWidth) return;
+
+                            const snapCanvas = document.createElement('canvas');
+                            snapCanvas.width = videoEl.videoWidth;
+                            snapCanvas.height = videoEl.videoHeight;
+                            const snapCtx = snapCanvas.getContext('2d');
+                            snapCtx.drawImage(videoEl, 0, 0, snapCanvas.width, snapCanvas.height);
+
+                            // 停止相機釋放資源並開始辨識
+                            stopActiveCamera();
+
+                            snapCanvas.toBlob(async (blob) => {
+                                if (!blob) return;
+                                const capturedFile = new File([blob], 'camera-capture.jpg', { type: 'image/jpeg' });
+                                await processUploadedFileForNames(capturedFile);
+                            }, 'image/jpeg', 0.95);
+                        };
+                    }
+
+                    if (btnSample) {
+                        btnSample.onclick = () => {
+                            const area = document.getElementById('modalImportNames');
+                            area.value = '李政憲\n李岱融\n李芸臻';
+                            showToast('已帶入黃紙照片中的 3 位姓名！');
+                        };
+                    }
+
+                    const btnFillScreenshot = document.getElementById('btnFillScreenshot');
+                    if (btnFillScreenshot) {
+                        btnFillScreenshot.onclick = () => {
+                            const area = document.getElementById('modalImportNames');
+                            area.value = '振熙\n明霈\n祺媛\n徐諦\n詣翔\n紫飛\n祈翰';
+                            showToast('已帶入截圖中的 7 位姓名！');
+                        };
+                    }
+
+                    const onFileSelected = async (e) => {
+                        const file = e.target.files && e.target.files[0];
+                        if (!file) return;
+                        stopActiveCamera();
+                        await processUploadedFileForNames(file);
+                        e.target.value = '';
+                    };
+
+                    if (fileAll) fileAll.addEventListener('change', onFileSelected);
+                    if (fileCam) fileCam.addEventListener('change', onFileSelected);
+                }, 80);
+            });
+
+            // 新增單一學生
+            const handleAddStudent = () => {
+                const input = document.getElementById('inputNewName');
+                const name = input.value.trim();
+                if (!name) return;
+                const group = getCurrentGroup();
+                clearDrawnPaths();
+                group.names.push(name);
+                group.prizes.push(String(group.names.length));
+                input.value = '';
+                syncUIFromState();
+                resizeAndDraw();
+                showToast(`已新增「${name}」`);
+            };
+            document.getElementById('btnAddName').addEventListener('click', handleAddStudent);
+            document.getElementById('inputNewName').addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') handleAddStudent();
+            });
+
+            // 隨機打亂姓名順序
+            document.getElementById('btnShuffleNames').addEventListener('click', () => {
+                const group = getCurrentGroup();
+                clearDrawnPaths();
+                for (let i = group.names.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [group.names[i], group.names[j]] = [group.names[j], group.names[i]];
+                }
+                syncUIFromState();
+                drawCanvas();
+                showToast('已隨機打亂同學順序');
+            });
+
+            // 名單填入撲克牌 (依目前人數)
+            document.getElementById('btnPokerNames').addEventListener('click', () => {
+                const group = getCurrentGroup();
+                const suits = ['♠', '♥', '♦', '♣'];
+                const values = ['A', 'K', 'Q', 'J', '10', '9', '8', '7', '6', '5', '4', '3', '2'];
+                const pokerDeck = [];
+                for (const suit of suits) {
+                    for (const val of values) {
+                        pokerDeck.push(`${suit}${val}`);
+                    }
+                }
+
+                clearDrawnPaths();
+                // 僅依據目前的人數替換姓名，保留原本的總人數與鬼腳圖橫線
+                group.names = group.names.map((_, i) => pokerDeck[i % 52]);
+                
+                syncUIFromState();
+                resizeAndDraw();
+                showToast(`已為目前的 ${group.names.length} 人替換為撲克牌名單！`);
+            });
+
+            // 目的地填入撲克牌
+            document.getElementById('btnPokerPrizes').addEventListener('click', () => {
+                const group = getCurrentGroup();
+                const suits = ['♠', '♥', '♦', '♣'];
+                const values = ['A', 'K', 'Q', 'J', '10', '9', '8', '7', '6', '5', '4', '3', '2'];
+                const pokerDeck = [];
+                for (const suit of suits) {
+                    for (const val of values) {
+                        pokerDeck.push(`${suit}${val}`);
+                    }
+                }
+                group.prizes = group.names.map((_, i) => pokerDeck[i % 52]);
+                syncUIFromState();
+                drawCanvas();
+                showToast('已依序填入撲克牌！');
+            });
+
+            // 目的地 1~N 依序編號
+            document.getElementById('btnAutoNumberPrizes').addEventListener('click', () => {
+                const group = getCurrentGroup();
+                group.prizes = group.names.map((_, i) => String(i + 1));
+                syncUIFromState();
+                drawCanvas();
+                showToast('已重設為 1 ~ N 順序編號');
+            });
+
+            // 隨機打亂底部號碼/品項
+            document.getElementById('btnShufflePrizes').addEventListener('click', () => {
+                const group = getCurrentGroup();
+                for (let i = group.prizes.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [group.prizes[i], group.prizes[j]] = [group.prizes[j], group.prizes[i]];
+                }
+                syncUIFromState();
+                drawCanvas();
+                showToast('已打亂底部號碼/品項順序');
+            });
+
+            // --- 縮放與全螢幕控制 ---
+            const updateZoomUI = () => {
+                document.getElementById('zoomLevelText').textContent = `${Math.round(currentZoom * 100)}%`;
+                resizeAndDraw();
+            };
+
+            document.getElementById('btnZoomIn').addEventListener('click', () => {
+                currentZoom = Math.min(2.5, currentZoom + 0.1);
+                updateZoomUI();
+            });
+
+            document.getElementById('btnZoomOut').addEventListener('click', () => {
+                currentZoom = Math.max(0.3, currentZoom - 0.1);
+                updateZoomUI();
+            });
+
+            const btnToggleFullscreen = document.getElementById('btnToggleFullscreen');
+            const fullscreenText = document.getElementById('fullscreenText');
+            
+            const toggleFullscreen = () => {
+                if (!document.fullscreenElement) {
+                    document.documentElement.requestFullscreen().catch(() => {
+                        showToast('您的瀏覽器不支援全螢幕功能');
+                    });
+                } else {
+                    document.exitFullscreen();
+                }
+            };
+
+            btnToggleFullscreen.addEventListener('click', toggleFullscreen);
+
+            document.addEventListener('fullscreenchange', () => {
+                if (document.fullscreenElement) {
+                    document.body.classList.add('fullscreen-mode');
+                    fullscreenText.textContent = '退出全螢幕';
+                    btnToggleFullscreen.querySelector('i').className = 'fa-solid fa-compress';
+                } else {
+                    document.body.classList.remove('fullscreen-mode');
+                    fullscreenText.textContent = '全螢幕';
+                    btnToggleFullscreen.querySelector('i').className = 'fa-solid fa-expand';
+                }
+                setTimeout(resizeAndDraw, 150); // 等待排版適應後重繪
+            });
+
+            // 橫線數量滑桿與輸入框連動
+            const sliderRung = document.getElementById('sliderRungCount');
+            const inputRung = document.getElementById('inputRungCount');
+            sliderRung.addEventListener('input', (e) => {
+                inputRung.value = e.target.value;
+                generateRandomRungs(parseInt(e.target.value, 10));
+            });
+            inputRung.addEventListener('change', (e) => {
+                const val = Math.max(0, Math.min(60, parseInt(e.target.value, 10) || 0));
+                e.target.value = val;
+                sliderRung.value = Math.min(35, val);
+                generateRandomRungs(val);
+            });
+
+            // 隨機產生橫線按鈕
+            document.getElementById('btnRandomRungs').addEventListener('click', () => {
+                const count = parseInt(inputRung.value, 10) || 6;
+                generateRandomRungs(count);
+                showToast(`已隨機產生 ${getCurrentGroup().rungs.length} 條綠線`);
+            });
+
+            // 清空所有橫線按鈕
+            document.getElementById('btnClearRungs').addEventListener('click', () => {
+                clearDrawnPaths();
+                getCurrentGroup().rungs = [];
+                syncUIFromState();
+                drawCanvas();
+                showToast('已清空所有綠色橫線');
+            });
+
+            // 遮蔽設定開關
+            document.getElementById('chkHideNames').addEventListener('change', (e) => {
+                state.hideNames = e.target.checked;
+                state.revealedNames = {};
+                syncUIFromState();
+                drawCanvas();
+            });
+            document.getElementById('chkHidePrizes').addEventListener('change', (e) => {
+                state.hidePrizes = e.target.checked;
+                state.revealedPrizes = {};
+                syncUIFromState();
+                drawCanvas();
+            });
+            document.getElementById('chkHideRungs').addEventListener('change', (e) => {
+                state.hideRungs = e.target.checked;
+                drawCanvas();
+            });
+
+            // 全部解除隱藏按鈕
+            document.getElementById('btnRevealAllMasks').addEventListener('click', () => {
+                state.hideNames = false;
+                state.hidePrizes = false;
+                state.hideRungs = false;
+                syncUIFromState();
+                drawCanvas();
+                showToast('已解除所有隱藏遮罩');
+            });
+
+            // 全部路線揭曉 (動畫)
+            document.getElementById('btnTraceAll').addEventListener('click', () => {
+                const group = getCurrentGroup();
+                state.selectedAutoCol = null;
+                for (let i = 0; i < group.names.length; i++) {
+                    if (!state.completedPaths[i]) {
+                        startAutoTraceAnimation(i);
+                    }
+                }
+            });
+
+            // 直接完成圖 (跳過動畫立即繪製全部路線)
+            document.getElementById('btnInstantAll').addEventListener('click', () => {
+                const group = getCurrentGroup();
+                state.activeAnimations = [];
+                state.selectedAutoCol = null;
+                for (let i = 0; i < group.names.length; i++) {
+                    if (!state.completedPaths[i]) {
+                        const pathInfo = calculatePathForColumn(i);
+                        state.completedPaths[i] = {
+                            startCol: i,
+                            endCol: pathInfo.endCol,
+                            pathRatios: pathInfo.pathRatios,
+                            color: PATH_COLORS[i % PATH_COLORS.length],
+                            isManual: false
+                        };
+                        state.revealedNames[i] = true;
+                        state.revealedPrizes[pathInfo.endCol] = true;
+                    }
+                }
+                updateAnimationStatusUI();
+                drawCanvas();
+                renderResultsSummary();
+                showToast('已顯示全體路線完成圖');
+            });
+
+            // 清除已畫路線
+            document.getElementById('btnClearPaths').addEventListener('click', () => {
+                clearDrawnPaths();
+                showToast('已清除路線');
+            });
+
+            // 備份與載入設定 JSON (方便複製保存)
+            document.getElementById('btnExportImport').addEventListener('click', () => {
+                const jsonStr = JSON.stringify(state.groups, null, 2);
+                openCustomModal({
+                    title: '備份或載入分組設定',
+                    htmlContent: `
+                        <p class="text-xs text-slate-500">您可以複製下方設定碼保存於記事本中，或貼上先前備份的設定碼後點擊「載入設定」：</p>
+                        <textarea id="modalJsonArea" rows="7" class="w-full font-mono text-xs border border-slate-300 rounded-lg p-2 bg-slate-50">${jsonStr}</textarea>
+                        <button id="btnCopyJson" class="w-full py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg text-xs font-bold transition">
+                            <i class="fa-regular fa-copy mr-1"></i>複製設定碼到剪貼簿
+                        </button>
+                    `,
+                    confirmText: '載入此設定',
+                    onConfirm: () => {
+                        try {
+                            const parsed = JSON.parse(document.getElementById('modalJsonArea').value);
+                            if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].names) {
+                                state.groups = parsed;
+                                state.currentGroupIndex = 0;
+                                clearDrawnPaths();
+                                syncUIFromState();
+                                resizeAndDraw();
+                                showToast('設定載入成功！');
+                                return true;
+                            }
+                        } catch (err) {
+                            showToast('格式錯誤，請確認設定碼是否完整');
+                            return false;
+                        }
+                    }
+                });
+
+                setTimeout(() => {
+                    const copyBtn = document.getElementById('btnCopyJson');
+                    if (copyBtn) {
+                        copyBtn.onclick = () => {
+                            const area = document.getElementById('modalJsonArea');
+                            area.select();
+                            document.execCommand('copy');
+                            showToast('已複製到剪貼簿！');
+                        };
+                    }
+                }, 50);
+            });
+
+            // --- Canvas 互動事件 (滑鼠與觸控) ---
+            const handlePointerDown = (evt) => {
+                const pos = getCanvasPointerPos(evt);
+                const geo = getCanvasGeometry();
+                const group = getCurrentGroup();
+
+                // 檢查是否點擊頂部「姓名方塊」
+                const nameY = geo.lineTop - 48;
+                if (pos.y >= nameY && pos.y <= nameY + LAYOUT.boxHeight) {
+                    for (let i = 0; i < geo.count; i++) {
+                        const colX = geo.getColX(i);
+                        if (Math.abs(pos.x - colX) <= LAYOUT.boxWidth / 2) {
+                            state.revealedNames[i] = true;
+                            if (state.mode === 'draw') {
+                                // 啟動手動連連看繪圖
+                                state.manualDraw.isDrawing = true;
+                                state.manualDraw.startCol = i;
+                                state.manualDraw.color = PATH_COLORS[i % PATH_COLORS.length];
+                                state.manualDraw.points = [{ x: colX, y: geo.lineTop }];
+                                delete state.completedPaths[i];
+                            } else {
+                                // 啟動電腦自動走線動畫或高亮已有路線
+                                if (state.completedPaths[i]) {
+                                    state.selectedAutoCol = state.selectedAutoCol === i ? null : i;
+                                } else {
+                                    state.selectedAutoCol = i;
+                                    startAutoTraceAnimation(i, false); // 由上往下
+                                }
+                            }
+                            drawCanvas();
+                            renderResultsSummary();
+                            return;
+                        }
+                    }
+                }
+
+                // 檢查是否點擊底部「號碼/品項方塊」 (可反向追蹤或單獨翻開遮罩)
+                const prizeY = geo.lineBottom + 12;
+                if (pos.y >= prizeY && pos.y <= prizeY + LAYOUT.boxHeight) {
+                    for (let i = 0; i < geo.count; i++) {
+                        const colX = geo.getColX(i);
+                        if (Math.abs(pos.x - colX) <= LAYOUT.boxWidth / 2) {
+                            if (state.mode === 'auto') {
+                                state.revealedPrizes[i] = true;
+                                const sCol = findStartColForEndCol(i);
+                                if (state.completedPaths[sCol]) {
+                                    // 已經畫過，切換高亮顯示
+                                    state.selectedAutoCol = state.selectedAutoCol === sCol ? null : sCol;
+                                } else {
+                                    // 尚未畫過，啟動反向動畫 (由下往上)
+                                    state.selectedAutoCol = sCol;
+                                    startAutoTraceAnimation(sCol, true);
+                                }
+                            } else {
+                                // 非 auto 模式下，點擊僅做翻開或蓋上遮罩的切換
+                                state.revealedPrizes[i] = !state.revealedPrizes[i];
+                            }
+                            drawCanvas();
+                            renderResultsSummary();
+                            return;
+                        }
+                    }
+                }
+
+                // 若在「點擊增減橫線」模式且點擊中間區域
+                if (state.mode === 'edit' && !state.hideRungs && pos.y > geo.lineTop + 10 && pos.y < geo.lineBottom - 10) {
+                    updateHoverRung(pos, geo);
+                    if (state.hoverRung) {
+                        clearDrawnPaths();
+                        if (state.hoverRung.existingIndex !== -1) {
+                            group.rungs.splice(state.hoverRung.existingIndex, 1);
+                            showToast('已刪除一條橫線');
+                        } else {
+                            group.rungs.push({
+                                col: state.hoverRung.col,
+                                yRatio: Number(state.hoverRung.yRatio.toFixed(3))
+                            });
+                            group.rungs.sort((a, b) => a.yRatio - b.yRatio);
+                            showToast('已新增一條橫線');
+                        }
+                        state.hoverRung = null;
+                        syncUIFromState();
+                        drawCanvas();
+                    }
+                }
+            };
+
+            const handlePointerMove = (evt) => {
+                const pos = getCanvasPointerPos(evt);
+                const geo = getCanvasGeometry();
+
+                if (state.mode === 'draw' && state.manualDraw.isDrawing) {
+                    evt.preventDefault();
+                    state.manualDraw.points.push({ x: pos.x, y: pos.y });
+                    drawCanvas();
+                } else if (state.mode === 'edit') {
+                    updateHoverRung(pos, geo);
+                    drawCanvas();
+                }
+            };
+
+            const handlePointerUp = (evt) => {
+                if (state.mode === 'draw' && state.manualDraw.isDrawing) {
+                    const geo = getCanvasGeometry();
+                    const pts = state.manualDraw.points;
+                    const lastPt = pts[pts.length - 1];
+
+                    // 判斷終點落在哪一個底部欄位附近
+                    let nearestEndCol = 0;
+                    let minDist = Infinity;
+                    for (let i = 0; i < geo.count; i++) {
+                        const d = Math.abs(lastPt.x - geo.getColX(i));
+                        if (d < minDist) {
+                            minDist = d;
+                            nearestEndCol = i;
+                        }
+                    }
+
+                    if (lastPt.y >= geo.lineBottom - 35 && minDist <= geo.colSpacing * 0.65) {
+                        pts.push({ x: geo.getColX(nearestEndCol), y: geo.lineBottom });
+                        const sCol = state.manualDraw.startCol;
+                        
+                        // --- 檢核機制 ---
+                        const correctPathInfo = calculatePathForColumn(sCol);
+                        if (nearestEndCol !== correctPathInfo.endCol) {
+                            openCustomModal({
+                                title: '檢核結果',
+                                htmlContent: `<div class="text-center py-2"><i class="fa-solid fa-circle-xmark text-4xl text-rose-500 mb-3"></i><p class="text-lg font-bold text-slate-700">連線不正確喔！</p><p class="text-sm text-slate-500 mt-2">請確保「逢綠線必轉」，再試一次看看！</p></div>`,
+                                showCancel: false,
+                                confirmText: '重新挑戰'
+                            });
+                            state.manualDraw.isDrawing = false;
+                            state.manualDraw.points = [];
+                            drawCanvas();
+                            return;
+                        }
+                        
+                        showToast('🎉 檢核通過！連線正確！');
+                        
+                        state.completedPaths[sCol] = {
+                            startCol: sCol,
+                            endCol: nearestEndCol,
+                            rawPoints: [...pts],
+                            color: state.manualDraw.color,
+                            isManual: true
+                        };
+                        state.revealedNames[sCol] = true;
+                        state.revealedPrizes[nearestEndCol] = true;
+                    } else {
+                        showToast('請將線條一路畫到底部的號碼方塊喔！');
+                    }
+
+                    state.manualDraw.isDrawing = false;
+                    state.manualDraw.points = [];
+                    drawCanvas();
+                    renderResultsSummary();
+                }
+            };
+
+            // 計算滑鼠在「編輯橫線」模式下對準哪兩條紅線之間
+            function updateHoverRung(pos, geo) {
+                const group = getCurrentGroup();
+                if (pos.y <= geo.lineTop + 15 || pos.y >= geo.lineBottom - 15) {
+                    state.hoverRung = null;
+                    return;
+                }
+                for (let c = 0; c < geo.count - 1; c++) {
+                    const x1 = geo.getColX(c);
+                    const x2 = geo.getColX(c + 1);
+                    if (pos.x >= x1 + 8 && pos.x <= x2 - 8) {
+                        const yRatio = geo.getYRatio(pos.y);
+                        // 檢查是否靠近現有的橫線
+                        const existingIndex = group.rungs.findIndex(
+                            r => r.col === c && Math.abs(geo.getY(r.yRatio) - pos.y) <= 14
+                        );
+                        state.hoverRung = {
+                            col: c,
+                            yRatio: existingIndex !== -1 ? group.rungs[existingIndex].yRatio : yRatio,
+                            existingIndex
+                        };
+                        return;
+                    }
+                }
+                state.hoverRung = null;
+            }
+
+            canvas.addEventListener('mousedown', handlePointerDown);
+            canvas.addEventListener('mousemove', handlePointerMove);
+            window.addEventListener('mouseup', handlePointerUp);
+            canvas.addEventListener('mouseleave', () => {
+                state.hoverRung = null;
+                drawCanvas();
+            });
+
+            canvas.addEventListener('touchstart', handlePointerDown, { passive: false });
+            canvas.addEventListener('touchmove', handlePointerMove, { passive: false });
+            canvas.addEventListener('touchend', handlePointerUp);
+        }
+
+        /**
+         * 處理使用者上傳的圖片或文件 (手寫影像增強 + Gemini 視覺模型高精準度辨識)
+         */
+        async function processUploadedFileForNames(file) {
+            const statusBox = document.getElementById('ocrStatusBox');
+            const statusTitle = document.getElementById('ocrStatusTitle');
+            const statusSub = document.getElementById('ocrStatusSub');
+            const thumb = document.getElementById('ocrPreviewThumb');
+            const textarea = document.getElementById('modalImportNames');
+
+            if (!statusBox || !textarea) return;
+
+            statusBox.classList.remove('hidden');
+            thumb.classList.add('hidden');
+            statusTitle.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i><span>正在讀取「${file.name}」...</span>`;
+            statusSub.textContent = '請稍候，正在解析檔案內容';
+
+            const ext = (file.name.split('.').pop() || '').toLowerCase();
+
+            try {
+                // 1. 純文字與 CSV
+                if (ext === 'txt' || ext === 'csv') {
+                    const text = await file.text();
+                    appendExtractedNames(textarea, text);
+                    statusTitle.innerHTML = `<i class="fa-solid fa-circle-check text-emerald-600"></i><span class="text-emerald-700">文字檔讀取完成！</span>`;
+                    statusSub.textContent = '可在下方直接檢視或微調名單';
+                    return;
+                }
+
+                // 2. Excel (.xlsx / .xls)
+                if (ext === 'xlsx' || ext === 'xls') {
+                    const data = await file.arrayBuffer();
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                    const rows = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
+                    const extracted = rows.flat().map(cell => String(cell || '').trim()).filter(Boolean).join('\n');
+                    appendExtractedNames(textarea, extracted);
+                    statusTitle.innerHTML = `<i class="fa-solid fa-circle-check text-emerald-600"></i><span class="text-emerald-700">Excel 名單解析成功！</span>`;
+                    statusSub.textContent = `共讀取 ${extracted.split('\n').filter(Boolean).length} 筆資料`;
+                    return;
+                }
+
+                // 3. Word (.docx)
+                if (ext === 'docx') {
+                    const arrayBuffer = await file.arrayBuffer();
+                    const result = await mammoth.extractRawText({ arrayBuffer });
+                    appendExtractedNames(textarea, result.value);
+                    statusTitle.innerHTML = `<i class="fa-solid fa-circle-check text-emerald-600"></i><span class="text-emerald-700">Word 文件解析成功！</span>`;
+                    statusSub.textContent = '可在下方確認名單內容';
+                    return;
+                }
+
+                // 4. 圖片檔 (包含手機拍照、黃色色紙手寫字等) 或 PDF 檔
+                const isImage = file.type.startsWith('image/') || ['jpg', 'jpeg', 'png', 'webp', 'heic'].includes(ext);
+                const isPdf = file.type === 'application/pdf' || ext === 'pdf';
+
+                if (isImage || isPdf) {
+                    let inlineDataParts = [];
+
+                    if (isImage) {
+                        statusTitle.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i><span>正在進行高解析影像處理...</span>`;
+                        statusSub.textContent = '自動校正透明背景與尺寸，準備進行辨識';
+
+                        const processed = await preprocessHandwritingImage(file);
+                        thumb.src = processed.originalDataUrl;
+                        thumb.classList.remove('hidden');
+
+                        // 僅傳送經過白底校正的高解析原圖，避免濾鏡破壞印刷字體
+                        inlineDataParts.push({
+                            inlineData: { mimeType: 'image/jpeg', data: processed.originalBase64 }
+                        });
+                    } else {
+                        // PDF 直接轉 base64
+                        const base64Pdf = await fileToBase64(file);
+                        inlineDataParts.push({
+                            inlineData: { mimeType: 'application/pdf', data: base64Pdf }
+                        });
+                    }
+
+                    statusTitle.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i><span>AI 正在精準辨識繁體中文姓名...</span>`;
+                    statusSub.textContent = '支援直向手寫、橫排方塊與清單格式';
+
+                    const recognizedNames = await callGeminiHandwritingOCR(inlineDataParts);
+                    if (recognizedNames && recognizedNames.length > 0) {
+                        // 預設清空或直接填入辨識結果，方便使用者立即檢視
+                        textarea.value = recognizedNames.join('\n');
+                        statusTitle.innerHTML = `<i class="fa-solid fa-circle-check text-emerald-600"></i><span class="text-emerald-700">辨識完成！共擷取到 ${recognizedNames.length} 位姓名</span>`;
+                        statusSub.textContent = '請確認下方文字框內容，若有需要可直接點擊修改';
+                    } else {
+                        throw new Error('未能辨識出有效文字');
+                    }
+                    return;
+                }
+
+                showToast('不支援的檔案格式，請上傳圖片、PDF、Word 或 Excel');
+            } catch (err) {
+                statusTitle.innerHTML = `<i class="fa-solid fa-triangle-exclamation text-rose-600"></i><span class="text-rose-600">辨識未完成，請重拍或手動調整</span>`;
+                statusSub.textContent = '小提示：請確保文字清晰且光線均勻';
+            }
+        }
+
+        // 將辨識出的文字附加到輸入框中
+        function appendExtractedNames(textarea, rawText) {
+            const cleaned = rawText
+                .split(/[\r\n,，、;；]+/)
+                .map(s => s.replace(/^[0-9.\-、()（）\s]+/, '').trim())
+                .filter(Boolean)
+                .join('\n');
+
+            if (!cleaned) return;
+            const existing = textarea.value.trim();
+            textarea.value = existing ? `${existing}\n${cleaned}` : cleaned;
+        }
+
+        // 檔案轉 Base64
+        function fileToBase64(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => {
+                    const res = String(reader.result || '');
+                    resolve(res.split(',')[1] || '');
+                };
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+        }
+
+        /**
+         * 改良版影像前處理：
+         * 1. 提供高解析度 (最高 2048px) 原始彩色影像，確保不會因為過度二值化導致筆畫斷裂產生錯字。
+         * 2. 提供柔和自動色階 (Auto-Levels) 增強影像，幫助辨識黃色色紙或陰影下的手寫字。
+         */
+        function preprocessHandwritingImage(file) {
+            return new Promise((resolve, reject) => {
+                const img = new Image();
+                const objectUrl = URL.createObjectURL(file);
+
+                img.onload = () => {
+                    URL.revokeObjectURL(objectUrl);
+                    const maxDim = 2048;
+                    let w = img.width;
+                    let h = img.height;
+                    if (w > maxDim || h > maxDim) {
+                        if (w > h) {
+                            h = Math.round((h * maxDim) / w);
+                            w = maxDim;
+                        } else {
+                            w = Math.round((w * maxDim) / h);
+                            h = maxDim;
+                        }
+                    }
+
+                    // 1. 高解析清晰原圖 (修復 PNG 透明背景變黑的問題)
+                    const canvasOrig = document.createElement('canvas');
+                    canvasOrig.width = w;
+                    canvasOrig.height = h;
+                    const ctxOrig = canvasOrig.getContext('2d');
+                    
+                    // 【關鍵修正】先鋪上純白底色，防止透明 PNG 圖片在轉 JPEG 時黑底黑字
+                    ctxOrig.fillStyle = '#ffffff';
+                    ctxOrig.fillRect(0, 0, w, h);
+                    ctxOrig.drawImage(img, 0, 0, w, h);
+                    
+                    const originalDataUrl = canvasOrig.toDataURL('image/jpeg', 0.95);
+                    const originalBase64 = originalDataUrl.split(',')[1];
+
+                    resolve({
+                        originalBase64,
+                        originalDataUrl
+                    });
+                };
+
+                img.onerror = (e) => {
+                    URL.revokeObjectURL(objectUrl);
+                    reject(e);
+                };
+
+                img.src = objectUrl;
+            });
+        }
+
+        /**
+         * 呼叫 Gemini 3 Flash Preview 進行結構化繁體中文姓名辨識
+         * 設定 temperature: 0.1 降低隨機猜測，並使用 JSON Schema 確保穩定輸出姓名陣列
+         */
+        async function callGeminiHandwritingOCR(inlineDataParts) {
+            const apiKey = "";
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
+
+            const systemPrompt = `你是一位頂尖的光學字元辨識（OCR）專家，專精於台灣繁體中文姓名。
+請從使用者提供的圖片中，由上而下、由左而右依序辨識出所有的人名。
+
+重要辨識原則：
+1. 圖片可能是「清晰的電腦螢幕截圖（如橫向排列的方塊字卡）」，也可能是手寫字。
+2. 若為印刷體/電腦字體，請【100% 絕對忠實】於圖片上的字元！絕不可因為覺得是罕見字或為了語意順暢而自行腦補替換（例如：寫「明霈」絕不能改成「明霞」，寫「徐諦」絕不能改成「徐啼」，寫「祺媛」不能亂改，寫「詣翔」絕不能改「誼翔」等）。
+3. 請精確分辨形近字，例如：霈/震/霞、 諦/啼/蹄、 詣/誼/旨、 熙/照。
+4. 切勿漏字，每個圓角方塊內的名字都要提取出來。若無人名請略過單純的數字編號。`;
+
+            const userPrompt = "請仔細觀察圖片中的每一個字的部首與筆畫，依序提取出圖片裡的所有姓名，並以 JSON 格式回傳。";
+
+            const payload = {
+                contents: [{
+                    role: "user",
+                    parts: [
+                        { text: userPrompt },
+                        ...inlineDataParts
+                    ]
+                }],
+                systemInstruction: {
+                    parts: [{ text: systemPrompt }]
+                },
+                generationConfig: {
+                    temperature: 0.1,
+                    responseMimeType: "application/json",
+                    responseSchema: {
+                        type: "OBJECT",
+                        properties: {
+                            names: {
+                                type: "ARRAY",
+                                items: { type: "STRING" }
+                            }
+                        },
+                        required: ["names"]
+                    }
+                }
+            };
+
+            const delays = [1000, 2000, 4000];
+            for (let attempt = 0; attempt <= delays.length; attempt++) {
+                try {
+                    const response = await fetch(apiUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (!response.ok) throw new Error('API Error');
+
+                    const result = await response.json();
+                    const rawJson = result?.candidates?.[0]?.content?.parts?.[0]?.text;
+                    if (rawJson) {
+                        const parsed = JSON.parse(rawJson);
+                        if (Array.isArray(parsed.names)) {
+                            return parsed.names.map(s => String(s).trim()).filter(Boolean);
+                        }
+                    }
+                } catch (err) {
+                    if (attempt === delays.length) throw err;
+                    await new Promise(r => setTimeout(r, delays[attempt]));
+                }
+            }
+            return [];
+        }
+    </script>
+</body>
+</html>
